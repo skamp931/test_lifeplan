@@ -108,8 +108,10 @@ def simulate_life_plan(data):
     current_monthly_salary_sub_yen = income["monthly_salary_sub"] * 10000
     current_bonus_annual_yen = income["bonus_annual"] * 10000
 
-    # 家族メンバーの現在の年齢を追跡
-    current_member_ages = {member["name"]: member["initial_age"] for member in family["members"]}
+    # 家族メンバーの現在の年齢を追跡 (初期化はループ外で)
+    # シミュレーション開始時の年齢をコピーして使用
+    member_current_ages_in_sim = {member["name"]: member["initial_age"] for member in family["members"]}
+
 
     # 住宅ローンの月額返済額を事前に計算 (円)
     monthly_loan_payment_yen = calculate_monthly_loan_payment(
@@ -141,13 +143,15 @@ def simulate_life_plan(data):
 
         # 学校一時金の年間支出 (円)
         annual_school_lump_sum_yen = 0
-        for member_name, age in current_member_ages.items():
-            current_age_in_year = age + (year - 1) # シミュレーション開始からの経過年数を加算
-            for school_type, school_info in school_lump_sums_config.items():
-                if school_info["start_age"] > 0 and current_age_in_year == school_info["start_age"]:
-                    annual_school_lump_sum_yen += school_info["amount"] * 10000 # 万円を円に
+        for member_name, age in member_current_ages_in_sim.items():
+            # current_age_in_year はその年の開始時の年齢
+            if age > 0: # 年齢が設定されているメンバーのみ考慮
+                for school_type, school_info in school_lump_sums_config.items():
+                    # 学校開始年齢が設定されており、かつ現在の年齢と一致する場合に計上
+                    if school_info["start_age"] > 0 and age == school_info["start_age"]:
+                        annual_school_lump_sum_yen += school_info["amount"] * 10000 # 万円を円に
 
-        # 合計年間支出 (円)
+        # 合計年間支出
         current_annual_expenditure_yen = inflated_base_annual_expenditure_yen + annual_insurance_premium_yen + annual_housing_loan_payment_yen + annual_school_lump_sum_yen
 
         # 年間収支 (円)
@@ -161,7 +165,7 @@ def simulate_life_plan(data):
             if policy["maturity_year"] > 0 and year == policy["maturity_year"]:
                 current_assets += policy["payout_amount"] * 10000 # 万円を円に
 
-        results.append({
+        row_data = {
             "年": year,
             "年間収入": int(annual_income_yen),
             "年間支出": int(current_annual_expenditure_yen),
@@ -169,11 +173,17 @@ def simulate_life_plan(data):
             "学校一時金": int(annual_school_lump_sum_yen),
             "年間収支": int(annual_balance_yen),
             "年末資産": int(current_assets)
-        })
+        }
 
-        # 家族メンバーの年齢を更新
-        for name in current_member_ages:
-            current_member_ages[name] += 1
+        # 家族メンバーのその年の年齢を追加
+        for name, age in member_current_ages_in_sim.items():
+            row_data[f"{name} 年齢"] = age
+
+        results.append(row_data)
+
+        # 家族メンバーの年齢を更新 (次の年のために)
+        for name in member_current_ages_in_sim:
+            member_current_ages_in_sim[name] += 1
 
     return pd.DataFrame(results)
 
@@ -190,7 +200,7 @@ async def get_gemini_suggestion(user_plan_description, simulation_df, current_da
     final_assets = simulation_df['年末資産'].iloc[-1]
     initial_assets = current_data["family"]["initial_assets"] * 10000 # 万円を円に
     years_to_simulate = current_data["family"]["years_to_simulate"]
-    average_annual_savings = simulation_df['年間収支'].mean() # 年間収支を貯蓄として扱う
+    average_annual_balance = simulation_df['年間収支'].mean() # 年間収支を貯蓄として扱う
     average_annual_income = simulation_df['年間収入'].mean()
     average_annual_expenditure = simulation_df['年間支出'].mean()
 
@@ -202,7 +212,7 @@ async def get_gemini_suggestion(user_plan_description, simulation_df, current_da
     - シミュレーション期間: {years_to_simulate} 年
     - 初期資産: {initial_assets:,} 円
     - 最終年末資産: {final_assets:,} 円
-    - 年間平均収支（貯蓄）: {int(average_annual_savings):,} 円
+    - 年間平均収支: {int(average_annual_balance):,} 円
     - 年間平均収入: {int(average_annual_income):,} 円
     - 年間平均支出: {int(average_annual_expenditure):,} 円
 
@@ -215,7 +225,7 @@ async def get_gemini_suggestion(user_plan_description, simulation_df, current_da
 
     suggestion_output = f"## ライフプラン改善提案 (Gemini AIによる)\n\n"
     suggestion_output += f"現在のシミュレーションでは、**{years_to_simulate}年後の年末資産は {final_assets:,} 円** と予測されています。\n"
-    suggestion_output += f"年間平均収支は {int(average_annual_savings):,} 円です。\n\n"
+    suggestion_output += f"年間平均収支は {int(average_annual_balance):,} 円です。\n\n"
 
     if final_assets < 0:
         suggestion_output += """
@@ -230,7 +240,7 @@ async def get_gemini_suggestion(user_plan_description, simulation_df, current_da
         ### ⚠️ 資産形成の加速が必要です。
 
         * **貯蓄率の向上:**
-            * 現在の年間平均収支 {int(average_annual_savings):,} 円を、例えば月5,000円（年間60,000円）増やすことを目標にしましょう。
+            * 現在の年間平均収支 {int(average_annual_balance):,} 円を、例えば月5,000円（年間60,000円）増やすことを目標にしましょう。
             * 固定費（通信費、保険料など）の見直しは、一度見直せば継続的な効果があります。
         * **投資戦略の最適化:**
             * NISAやiDeCoなどの非課税制度を最大限に活用し、長期的な視点で積立投資を継続しましょう。
@@ -308,10 +318,14 @@ TYPE_MAP = {
     "housing_loan.loan_term_years": int,
 }
 
-# 動的なリスト（家族メンバー、保険）の項目はTYPE_MAPで直接定義できないため、
-# unflatten_data_from_csv内で個別に処理するか、汎用的な型推論に頼る。
-# 今回は、汎用的な型推論と、必要に応じてint/floatへの変換を試みる。
-
+# 動的なリスト内の辞書項目の型を定義
+DYNAMIC_LIST_ITEM_TYPE_MAP = {
+    "name": str,
+    "initial_age": int,
+    "monthly_premium": int,
+    "maturity_year": int,
+    "payout_amount": int, # 万円
+}
 
 # --- データをフラット化してCSV用に変換するヘルパー関数 ---
 def flatten_data_for_csv(data_dict, parent_key=''):
@@ -323,8 +337,9 @@ def flatten_data_for_csv(data_dict, parent_key=''):
         elif isinstance(value, list):
             for i, item in enumerate(value):
                 if isinstance(item, dict):
+                    # リスト内の辞書の場合、キーは "parent.list_name.index.dict_key"
                     flattened.extend(flatten_data_for_csv(item, f"{new_key}.{i}"))
-                else: # リスト内に辞書以外の要素がある場合
+                else: # リスト内に辞書以外の要素がある場合 (現在のデータ構造では発生しないはずだが念のため)
                     flattened.append({"項目": f"{new_key}.{i}", "値": item})
         else:
             flattened.append({"項目": new_key, "値": value})
@@ -334,89 +349,85 @@ def flatten_data_for_csv(data_dict, parent_key=''):
 def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     new_data = initial_data_structure.copy() # 初期構造をコピーして変更
 
-    # リストの初期化
+    # 動的なリスト（家族メンバー、保険）をCSVから再構築するために、
+    # まず初期データ構造の対応するリストをクリアします。
+    # これにより、CSVに存在するデータのみがロードされ、古いデータが残るのを防ぎます。
     new_data["family"]["members"] = []
     new_data["insurance_policies"] = []
 
     for index, row in df_uploaded.iterrows():
-        item_path_str = row["項目"]
-        value = row["値"]
+        item_path_str = str(row["項目"]) # Ensure item_path_str is always a string
+        value_from_csv = row["値"]
 
         path_parts = item_path_str.split('.')
         current_level = new_data
 
         for i, key_part in enumerate(path_parts):
-            if i == len(path_parts) - 1: # 最終要素
-                # 型変換を試みる
-                target_type = TYPE_MAP.get(item_path_str)
+            if i == len(path_parts) - 1: # 最終要素 (値を設定する場所)
+                processed_value = value_from_csv
+                
+                # Determine target type based on full path or last key part
+                target_type = None
+                if item_path_str in TYPE_MAP:
+                    target_type = TYPE_MAP[item_path_str]
+                else:
+                    last_key_part = key_part
+                    if last_key_part in DYNAMIC_LIST_ITEM_TYPE_MAP:
+                        target_type = DYNAMIC_LIST_ITEM_TYPE_MAP[last_key_part]
+
+                # Perform type conversion
                 if target_type:
                     try:
-                        if pd.isna(value):
-                            value = 0 if target_type == int else 0.0
+                        if pd.isna(processed_value):
+                            processed_value = 0 if target_type == int else 0.0
                         else:
-                            value = target_type(value)
+                            processed_value = target_type(processed_value)
                     except (ValueError, TypeError):
-                        st.warning(f"Warning: Could not convert '{value}' for '{item_path_str}' to {target_type.__name__}. Using default value (0 or 0.0).")
-                        value = 0 if target_type == int else 0.0
-                else: # TYPE_MAPにない項目 (例: 家族名など文字列、または動的なリストの要素)
-                    if pd.isna(value):
-                        value = "" # 文字列の場合は空文字列
-                    # それ以外はそのままの値を使用
+                        st.warning(f"Warning: Could not convert '{value_from_csv}' for '{item_path_str}' to {target_type.__name__}. Using default value (0 or 0.0).")
+                        processed_value = 0 if target_type == int else 0.0
+                else: # Fallback for types not in TYPE_MAP or DYNAMIC_LIST_ITEM_TYPE_MAP
+                    if pd.isna(processed_value):
+                        processed_value = "" # Default for strings
+                    elif isinstance(processed_value, str):
+                        try:
+                            float_val = float(processed_value)
+                            if float_val == int(float_val):
+                                processed_value = int(float_val)
+                            else:
+                                processed_value = float_val
+                        except ValueError:
+                            pass # Keep as string if not convertible
 
-                # 値を設定
-                if key_part.isdigit() and isinstance(current_level, list): # リストのインデックスの場合
-                    idx = int(key_part)
-                    while len(current_level) <= idx: # リストのサイズを調整
-                        if path_parts[i-1] == "members":
-                            current_level.append({"name": "", "initial_age": 0}) # 家族メンバーのデフォルト構造
-                        elif path_parts[i-1] == "insurance_policies":
-                            current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0}) # 保険のデフォルト構造
-                        else:
-                            current_level.append({}) # その他の辞書リスト
-                    current_level[idx][path_parts[i+1]] = value if i+1 < len(path_parts) else value # ここは少し複雑になる
-                    # 動的なリスト内の要素は、key_partが数字で、次の要素が実際のキーになるため、
-                    # 最終要素の処理を少し調整する必要がある。
-                    # 以下のロジックは、リスト内の辞書を想定している。
-                    if i + 1 == len(path_parts): # 最後のキーが数字の場合（例: list.0）
-                        current_level[idx] = value
-                    else: # リスト内の辞書の場合（例: list.0.key）
-                        if path_parts[i-1] == "members":
-                            current_level[idx][key_part] = value # name, initial_age
-                        elif path_parts[i-1] == "insurance_policies":
-                            current_level[idx][key_part] = value # name, monthly_premium, etc.
-                        else:
-                            current_level[idx][key_part] = value # fallback
-                else:
-                    current_level[key_part] = value
-
-            else: # 中間要素
-                if key_part.isdigit(): # リストのインデックス
+                # Assign the processed value to the final key
+                current_level[key_part] = processed_value
+                
+            else: # 中間要素 (辞書またはリストのキー/インデックス)
+                if key_part.isdigit(): # リストのインデックスの場合
                     idx = int(key_part)
                     # 親がリストであることを確認
                     if not isinstance(current_level, list):
-                        # これはエラーケースか、またはCSV構造が期待と異なる
-                        # ここでは、リストとして初期化する
-                        # st.error(f"Error: Expected list at {'.'.join(path_parts[:i])}, but found {type(current_level)}")
-                        current_level[path_parts[i-1]] = [] # これは間違ったパスになる可能性あり
-                        # より安全なのは、path_partsを再構築して、正しくリストにアクセスすること
-                        # この複雑さを避けるため、動的なリストの処理は別途考慮する
-                        pass # このケースは現在のflatten/unflattenでは発生しないはず
-
+                        st.error(f"Error: Expected list at '{'.'.join(path_parts[:i])}' but found '{type(current_level)}' for key '{key_part}'. Path: {item_path_str}")
+                        return initial_data_structure # Fallback to initial data to prevent further errors
+                    
+                    # リストに十分な要素があることを確認し、必要に応じてデフォルトの辞書を追加
                     while len(current_level) <= idx:
-                        if path_parts[i-1] == "members":
+                        parent_key_for_list = path_parts[i-1] if i > 0 else None
+                        if parent_key_for_list == "members":
                             current_level.append({"name": "", "initial_age": 0})
-                        elif path_parts[i-1] == "insurance_policies":
+                        elif parent_key_for_list == "insurance_policies":
                             current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
                         else:
-                            current_level.append({}) # 未知のリスト内の辞書
-                    current_level = current_level[idx]
-                else: # 辞書のキー
+                            current_level.append({}) # Generic dict if type unknown
+                    current_level = current_level[idx] # 次のレベル（リスト内の辞書）に進む
+                else: # 辞書のキーの場合
+                    next_is_list = (i + 1 < len(path_parts) and path_parts[i+1].isdigit())
+                    
                     if key_part not in current_level or not isinstance(current_level[key_part], (dict, list)):
-                        # 次の要素が数字ならリスト、そうでなければ辞書
-                        if i + 1 < len(path_parts) and path_parts[i+1].isdigit():
+                        if next_is_list:
                             current_level[key_part] = []
                         else:
                             current_level[key_part] = {}
+                    
                     current_level = current_level[key_part]
     return new_data
 
@@ -443,10 +454,11 @@ def main():
     uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["csv"])
     if uploaded_file is not None:
         try:
-            df_uploaded = pd.read_csv(uploaded_file)
             # アップロードされたデータをセッションステートに反映
+            df_uploaded = pd.read_csv(uploaded_file)
             st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
             st.success("データが正常にアップロードされ、反映されました！")
+            # アップロードされたデータの表示は削除済み
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
             # エラー時に初期データを再設定
@@ -467,25 +479,40 @@ def main():
     with col1:
         st.subheader("家族構成・基本設定")
         # 家族メンバーの動的な追加・削除
+        # st.session_state.data["family"]["members"] の初期化と整合性を確保
         if "members_count" not in st.session_state:
             st.session_state.members_count = len(st.session_state.data["family"]["members"])
+        # アップロード後に members_count がデータと一致するように調整
+        elif st.session_state.members_count != len(st.session_state.data["family"]["members"]):
+             st.session_state.members_count = len(st.session_state.data["family"]["members"])
+
 
         for i in range(st.session_state.members_count):
             st.markdown(f"**メンバー {i+1}**")
+            # メンバーリストが空の場合に備える
+            if i >= len(st.session_state.data["family"]["members"]):
+                st.session_state.data["family"]["members"].append({"name": "", "initial_age": 0})
+
+            # ここで、valueが確実に数値型であることを確認
+            current_initial_age = st.session_state.data["family"]["members"][i]["initial_age"]
+            if not isinstance(current_initial_age, (int, float)):
+                st.warning(f"Warning: Member {i+1} initial age was not numeric ({current_initial_age}). Setting to 0.")
+                current_initial_age = 0
+
             member_name = st.text_input(f"名前", value=st.session_state.data["family"]["members"][i]["name"], key=f"member_name_{i}")
-            member_age = st.number_input(f"初期年齢", min_value=0, max_value=100, value=st.session_state.data["family"]["members"][i]["initial_age"], step=1, key=f"member_age_{i}")
+            member_age = st.number_input(f"初期年齢", min_value=0, max_value=100, value=current_initial_age, step=1, key=f"member_age_{i}")
             st.session_state.data["family"]["members"][i]["name"] = member_name
             st.session_state.data["family"]["members"][i]["initial_age"] = member_age
 
         if st.button("メンバーを追加", key="add_member_btn"):
             st.session_state.data["family"]["members"].append({"name": f"New Member {st.session_state.members_count + 1}", "initial_age": 0})
             st.session_state.members_count += 1
-            st.experimental_rerun() # メンバー追加後にUIを更新
+            st.rerun() # st.experimental_rerun() を st.rerun() に変更
 
         if st.session_state.members_count > 0 and st.button("最後のメンバーを削除", key="remove_member_btn"):
             st.session_state.data["family"]["members"].pop()
             st.session_state.members_count -= 1
-            st.experimental_rerun() # メンバー削除後にUIを更新
+            st.rerun() # st.experimental_rerun() を st.rerun() に変更
 
         st.session_state.data["family"]["years_to_simulate"] = st.number_input(
             "シミュレーション年数 (年)",
@@ -578,24 +605,49 @@ def main():
         # 保険の動的な追加・削除
         if "insurance_count" not in st.session_state:
             st.session_state.insurance_count = len(st.session_state.data["insurance_policies"])
+        # アップロード後に insurance_count がデータと一致するように調整
+        elif st.session_state.insurance_count != len(st.session_state.data["insurance_policies"]):
+            st.session_state.insurance_count = len(st.session_state.data["insurance_policies"])
+
 
         for i in range(st.session_state.insurance_count):
             st.markdown(f"**保険 {i+1}**")
+            # 保険リストが空の場合に備える
+            if i >= len(st.session_state.data["insurance_policies"]):
+                st.session_state.data["insurance_policies"].append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
+
+            # ここで、valueが確実に数値型であることを確認
+            current_monthly_premium = st.session_state.data["insurance_policies"][i]["monthly_premium"]
+            if not isinstance(current_monthly_premium, (int, float)):
+                st.warning(f"Warning: Insurance {i+1} monthly premium was not numeric ({current_monthly_premium}). Setting to 0.")
+                current_monthly_premium = 0
+
+            current_maturity_year = st.session_state.data["insurance_policies"][i]["maturity_year"]
+            if not isinstance(current_maturity_year, (int, float)):
+                st.warning(f"Warning: Insurance {i+1} maturity year was not numeric ({current_maturity_year}). Setting to 0.")
+                current_maturity_year = 0
+
+            current_payout_amount = st.session_state.data["insurance_policies"][i]["payout_amount"]
+            if not isinstance(current_payout_amount, (int, float)):
+                st.warning(f"Warning: Insurance {i+1} payout amount was not numeric ({current_payout_amount}). Setting to 0.")
+                current_payout_amount = 0
+
+
             policy = st.session_state.data["insurance_policies"][i]
             policy["name"] = st.text_input(f"保険名", value=policy["name"], key=f"ins_name_{i}")
-            policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=policy["monthly_premium"], step=1000, key=f"ins_premium_{i}")
-            policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["maturity_year"], step=1, key=f"ins_maturity_year_{i}")
-            policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=policy["payout_amount"], step=10, key=f"ins_payout_{i}")
+            policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=current_monthly_premium, step=1000, key=f"ins_premium_{i}")
+            policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=current_maturity_year, step=1, key=f"ins_maturity_year_{i}")
+            policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=current_payout_amount, step=10, key=f"ins_payout_{i}")
 
         if st.button("保険を追加", key="add_insurance_btn"):
             st.session_state.data["insurance_policies"].append({"name": f"新規保険 {st.session_state.insurance_count + 1}", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
             st.session_state.insurance_count += 1
-            st.experimental_rerun() # 保険追加後にUIを更新
+            st.rerun() # st.experimental_rerun() を st.rerun() に変更
 
         if st.session_state.insurance_count > 0 and st.button("最後の保険を削除", key="remove_insurance_btn"):
             st.session_state.data["insurance_policies"].pop()
             st.session_state.insurance_count -= 1
-            st.experimental_rerun() # 保険削除後にUIを更新
+            st.rerun() # st.experimental_rerun() を st.rerun() に変更
 
 
     # --- シミュレーション実行ボタン ---
@@ -624,6 +676,7 @@ def main():
             "学校一時金": "{:,}円",
             "年間収支": "{:,}円",
             "年末資産": "{:,}円"
+            # メンバー年齢の列は自動的に表示されるため、ここでは特別なフォーマットは不要
         }), use_container_width=True)
 
         st.line_chart(simulation_df.set_index("年")["年末資産"])
