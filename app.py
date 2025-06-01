@@ -148,7 +148,8 @@ def simulate_life_plan(data):
     income_exp_changed_at_65 = False
 
     # 住宅ローンの月額返済額を事前に計算 (円)
-    monthly_loan_payment_yen = calculate_monthly_loan_payment(
+    # monthly_loan_payment_yen はシミュレーションのスコープ内で利用されるため、ここで定義
+    monthly_loan_payment_yen_in_sim = calculate_monthly_loan_payment(
         housing_loan["loan_amount"],
         housing_loan["loan_interest_rate"],
         housing_loan["loan_term_years"]
@@ -240,7 +241,7 @@ def simulate_life_plan(data):
         annual_housing_loan_payment_yen = 0
         # ローン開始年以降、かつ返済期間内の場合のみ計上
         if housing_loan["loan_amount"] > 0 and housing_loan["loan_term_years"] > 0 and housing_loan["start_year"] <= year and (year - housing_loan["start_year"] + 1) <= housing_loan["loan_term_years"]:
-            annual_housing_loan_payment_yen = monthly_loan_payment_yen * 12
+            annual_housing_loan_payment_yen = monthly_loan_payment_yen_in_sim * 12 # ここで monthly_loan_payment_yen_in_sim を使用
 
         # 学校一時金の年間支出 (円) - インフレ適用なし
         annual_school_lump_sum_yen = 0
@@ -414,7 +415,7 @@ qa_data = [
     {"q": "家族の年齢によって収入や支出は変わりますか？", "a": "はい、主要なメンバーが60歳と65歳に達した際の収入と支出を個別に設定できます。これにより、退職後の生活費の変化などをシミュレーションに反映させることが可能です。"},
     {"q": "教育費はどのように計算されますか？", "a": "教育費は「学校一時金」（入学時などのまとまった費用）と「年間在学費用」（在学中に毎年かかる費用）に分けて設定できます。各学校の開始年齢と在学期間に基づいて、自動的に費用が計上されます。"},
     {"q": "車やリフォームなどの大きな出費も考慮できますか？", "a": "はい、「その他一時支出金」の項目で、車購入やリフォームなど、特定の年に発生するまとまった支出を複数追加してシミュレーションに含めることができます。"},
-    {"q": "シミュレーション結果の表にある「再掲」とは何ですか？", "a": "「再掲」と記載されている項目（例：月額支出合計、保険支出、住宅ローン額、学校一時金など）は、年間支出の内訳として、その詳細を再度表示しているものです。全体の支出の内訳を分かりやすくするために表示しています。"},
+    {"q": "シミュレーション結果の表にある「再掲」とは何ですか？", "a": "「再掲」と記載されている項目（例：月額支出合計、保険支出、住宅ローン額、学校一時金など）は、それぞれの支出の内訳として、その詳細を再度表示しているものです。全体の支出の内訳を分かりやすくするために表示しています。"},
     {"q": "シミュレーション結果のセルの色や文字色は何を示していますか？", "a": "年間収支がマイナスの場合は文字色が赤色になり、注意を促します。また、家族メンバーが65歳に達した年の年齢は文字色が青色になり、ライフイベントの目安として表示されます。再掲項目は文字色が灰色で表示されます。"},
     {"q": "シミュレーションデータは保存できますか？", "a": "はい、現在のシミュレーション設定データをCSV形式でダウンロードできます。次回アプリを利用する際に、このCSVファイルをアップロードすることで、前回の設定からシミュレーションを再開できます。"},
     {"q": "AIからの改善提案はどのように利用しますか？", "a": "あなたのライフプランに関する目標や課題を入力すると、AIがシミュレーション結果に基づいて、資産形成を加速するための具体的なアドバイスや行動計画を提案します。"}
@@ -666,8 +667,7 @@ def main():
             # バージョン管理は行わず、常にデータを読み込む
             st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
             st.success("データが正常にアップロードされ、反映されました！")
-            st.warning("アップロードされたCSVの項目が現在のアプリのバージョンと異なる場合、正しく読み込めない可能性があります。")
-            st.info("現在のアプリのバージョンに合わせたCSVをダウンロードし、データを移行することをお勧めします。")
+            st.info("データ内を確認できます。")
 
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
@@ -799,7 +799,7 @@ def main():
         st.session_state.data["expenditure"]["education_at_60"] = st.number_input("60歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_60"], step=1, key="education_60")
         st.session_state.data["expenditure"]["utilities_at_60"] = st.number_input("60歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_60"], step=1, key="utilities_60")
         st.session_state.data["expenditure"]["communication_at_60"] = st.number_input("60歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_60"], step=1, key="communication_60")
-        st.session_state.data["expenditure"]["leisure_at_60"] = st.number_input("60歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_60"], step=1, key="leisure_60")
+        st.session_state.data["expenditure"]["leisure_at_60"] = st.number_input("60歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_60"], step=1, key="leisure_60")
         st.session_state.data["expenditure"]["medical_at_60"] = st.number_input("60歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_60"], step=1, key="medical_60")
         st.session_state.data["expenditure"]["other_at_60"] = st.number_input("60歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_60"], step=1, key="other_60")
 
@@ -809,7 +809,7 @@ def main():
         st.session_state.data["expenditure"]["education_at_65"] = st.number_input("65歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_65"], step=1, key="education_65")
         st.session_state.data["expenditure"]["utilities_at_65"] = st.number_input("65歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_65"], step=1, key="utilities_65")
         st.session_state.data["expenditure"]["communication_at_65"] = st.number_input("65歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_65"], step=1, key="communication_65")
-        st.session_state.data["expenditure"]["leisure_at_65"] = st.number_input("65歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_65"], step=1, key="leisure_65")
+        st.session_state.data["expenditure"]["leisure_at_65"] = st.number_input("65歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_65"], step=1, key="leisure_65")
         st.session_state.data["expenditure"]["medical_at_65"] = st.number_input("65歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_65"], step=1, key="medical_65")
         st.session_state.data["expenditure"]["other_at_65"] = st.number_input("65歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_65"], step=1, key="other_65")
 
@@ -861,16 +861,17 @@ def main():
             "返済開始年 (シミュレーション開始から)",
             min_value=1, max_value=st.session_state.data["family"]["years_to_simulate"], value=st.session_state.data["housing_loan"]["start_year"], step=1, key="loan_start_year_input"
         )
-        monthly_loan_payment_display = calculate_monthly_loan_payment(
+        monthly_loan_payment_for_display = calculate_monthly_loan_payment( # 変数名を明確化
             st.session_state.data["housing_loan"]["loan_amount"],
             st.session_state.data["housing_loan"]["loan_interest_rate"],
             st.session_state.data["housing_loan"]["loan_term_years"]
         )
-        st.info(f"**月々のローン返済額 (目安):** {int(monthly_loan_payment_display):,} 円")
+        st.info(f"**月々のローン返済額 (目安):** {int(monthly_loan_payment_for_display):,} 円")
 
         # 住宅ローンの金利合計額を表示
         if st.session_state.data["housing_loan"]["loan_amount"] > 0 and st.session_state.data["housing_loan"]["loan_term_years"] > 0:
-            total_loan_payments_yen = monthly_loan_payment_yen * (st.session_state.data["housing_loan"]["loan_term_years"] * 12)
+            # monthly_loan_payment_for_display を利用して計算
+            total_loan_payments_yen = monthly_loan_payment_for_display * (st.session_state.data["housing_loan"]["loan_term_years"] * 12)
             total_interest_paid_yen = total_loan_payments_yen - (st.session_state.data["housing_loan"]["loan_amount"] * 10000)
             st.info(f"**住宅ローンの金利合計額:** {int(total_interest_paid_yen):,} 円")
 
