@@ -219,7 +219,8 @@ def simulate_life_plan(data):
 
         # 住宅ローン返済額の年間支出 (円)
         annual_housing_loan_payment_yen = 0
-        if housing_loan["loan_term_years"] > 0 and housing_loan["start_year"] <= year and (year - housing_loan["start_year"] + 1) <= housing_loan["loan_term_years"]:
+        # ローン開始年以降、かつ返済期間内の場合のみ計上
+        if housing_loan["loan_amount"] > 0 and housing_loan["loan_term_years"] > 0 and housing_loan["start_year"] <= year and (year - housing_loan["start_year"] + 1) <= housing_loan["loan_term_years"]:
             annual_housing_loan_payment_yen = monthly_loan_payment_yen * 12
 
         # 学校一時金の年間支出 (円)
@@ -237,10 +238,9 @@ def simulate_life_plan(data):
                     
                     # 在学費用
                     if school_info["start_age"] > 0 and school_info["duration"] > 0:
-                        enrollment_start_year_for_member = year - (age_in_sim_start_of_year - school_info["start_age"])
-                        enrollment_end_year_for_member = enrollment_start_year_for_member + school_info["duration"] - 1
-                        
-                        if enrollment_start_year_for_member <= year <= enrollment_end_year_for_member:
+                        # その年の開始時の年齢が学校の開始年齢以上で、かつ終了年齢以下の場合
+                        enrollment_end_age = school_info["start_age"] + school_info["duration"] - 1
+                        if school_info["start_age"] <= age_in_sim_start_of_year <= enrollment_end_age:
                             annual_school_enrollment_cost_yen += school_info["annual_cost"] * 10000 # 万円を円に
 
         # その他一時金 (円)
@@ -267,7 +267,7 @@ def simulate_life_plan(data):
             "年": year,
             "年間収入": int(annual_income_yen),
             "月額支出合計": int(current_base_monthly_exp_thousand_yen * 1000), # 千円を円に
-            "保険支出": int(annual_insurance_premium_yen), # 新規
+            "保険支出": int(annual_insurance_premium_yen),
             "年間支出": int(current_annual_expenditure_yen),
             "住宅ローン額(再掲)": int(annual_housing_loan_payment_yen), # 再掲
             "学校一時金(再掲)": int(annual_school_lump_sum_yen), # 再掲
@@ -580,14 +580,12 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
 
 # --- DataFrameのスタイル設定ヘルパー関数 ---
 def highlight_rekei_columns(s):
-    # '住宅ローン額(再掲)'と'学校一時金(再掲)'の列をハイライト
-    is_rekei_column = pd.Series(False, index=s.index)
-    if '住宅ローン額(再掲)' in s.name:
-        is_rekei_column = True
-    if '学校一時金(再掲)' in s.name:
-        is_rekei_column = True
-    
-    return ['background-color: #e0e0e0' if is_rekei_column else '' for _ in s]
+    # s は Series (DataFrameの1列)
+    # s.name はその列の名前
+    if s.name == '住宅ローン額(再掲)' or s.name == '学校一時金(再掲)':
+        # 列全体にスタイルを適用するため、sの長さと同じリストを返す
+        return ['background-color: #e0e0e0'] * len(s)
+    return [''] * len(s) # スタイルを適用しない場合は空文字列のリストを返す
 
 def highlight_negative_balance(val):
     # '年間収支'がマイナスの場合にセルをハイライト
@@ -812,7 +810,7 @@ def main():
             "返済期間 (年)",
             min_value=0, max_value=50, value=st.session_state.data["housing_loan"]["loan_term_years"], step=1, key="loan_term_years_input"
         )
-        st.session_state.data["housing_loan"]["start_year"] = st.number_input( # 新規
+        st.session_state.data["housing_loan"]["start_year"] = st.number_input(
             "返済開始年 (シミュレーション開始から)",
             min_value=1, max_value=st.session_state.data["family"]["years_to_simulate"], value=st.session_state.data["housing_loan"]["start_year"], step=1, key="loan_start_year_input"
         )
@@ -835,14 +833,14 @@ def main():
         for i in range(st.session_state.insurance_count):
             st.markdown(f"**保険 {i+1}**")
             if i >= len(st.session_state.data["insurance_policies"]):
-                st.session_state.data["insurance_policies"].append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1}) # start_year追加
+                st.session_state.data["insurance_policies"].append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1})
 
             policy = st.session_state.data["insurance_policies"][i]
             policy["name"] = st.text_input(f"保険名", value=policy["name"], key=f"ins_name_{i}")
             policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=policy["monthly_premium"], step=1000, key=f"ins_premium_{i}")
             policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["maturity_year"], step=1, key=f"ins_maturity_year_{i}")
             policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=policy["payout_amount"], step=10, key=f"ins_payout_{i}")
-            policy["start_year"] = st.number_input(f"支払い開始年 (シミュレーション開始から)", min_value=1, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["start_year"], step=1, key=f"ins_start_year_{i}") # 新規
+            policy["start_year"] = st.number_input(f"支払い開始年 (シミュレーション開始から)", min_value=1, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["start_year"], step=1, key=f"ins_start_year_{i}")
 
         if st.button("保険を追加", key="add_insurance_btn"):
             st.session_state.data["insurance_policies"].append({"name": f"新規保険 {st.session_state.insurance_count + 1}", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1})
@@ -903,6 +901,7 @@ def main():
         st.session_state.simulation_df = simulation_df # 結果をセッションステートに保存
 
         # スタイル適用
+        # formatを最初に適用
         styled_df = simulation_df.style.format({
             "年間収入": "{:,}円",
             "月額支出合計": "{:,}円",
@@ -917,15 +916,17 @@ def main():
         })
         
         # 再掲列の背景色
+        # apply(axis=0) は列ごとにスタイル関数を適用
         styled_df = styled_df.apply(highlight_rekei_columns, axis=0)
         
         # 年間収支がマイナスのセルの背景色
+        # applymap は個々のセルにスタイル関数を適用
         styled_df = styled_df.applymap(highlight_negative_balance, subset=['年間収支'])
 
         # メンバーの年齢が65歳の場合のセルの背景色
-        # メンバー年齢の列名を取得
+        # apply(axis=1) は行ごとにスタイル関数を適用
         member_age_cols = [col for col in simulation_df.columns if "年齢" in col]
-        if member_age_cols:
+        if member_age_cols: # メンバー年齢列が存在する場合のみ適用
             styled_df = styled_df.apply(highlight_65_age, axis=1, subset=member_age_cols)
 
 
