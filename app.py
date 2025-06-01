@@ -118,7 +118,7 @@ def simulate_life_plan(data):
     expenditure_config = data["expenditure"]
     school_lump_sums_config = data["school_lump_sums"]
     insurance_policies = data["insurance_policies"]
-    other_lump_expenditures = data["other_lump_expenditures"] # 名称変更
+    other_lump_expenditures = data["other_lump_expenditures"]
     housing_loan = data["housing_loan"]
 
     years_to_simulate = family["years_to_simulate"]
@@ -203,13 +203,22 @@ def simulate_life_plan(data):
                 
                 income_exp_changed_at_65 = True
 
+        # 満期保険の受取処理 (円) - 収入に加算
+        annual_insurance_payout_yen = 0
+        for policy in insurance_policies:
+            if policy["maturity_year"] > 0 and year == policy["maturity_year"]:
+                annual_insurance_payout_yen += policy["payout_amount"] * 10000 # 万円を円に
+
         # 年間収入の計算 (円)
-        annual_income_yen = (current_monthly_salary_main_yen + current_monthly_salary_sub_yen) * 12 + current_bonus_annual_yen
+        annual_income_yen = (current_monthly_salary_main_yen + current_monthly_salary_sub_yen) * 12 + current_bonus_annual_yen + annual_insurance_payout_yen
 
         # 月額支出合計 (千円) - インフレ適用
         current_base_monthly_exp_thousand_yen = sum(current_expenditure_values_thousand_yen.values())
         # 月額支出合計にのみインフレ率を適用し、年間支出に変換
         inflated_base_annual_expenditure_yen = (current_base_monthly_exp_thousand_yen * 1000 * 12) * ((1 + inflation_rate)**(year - 1))
+        # シミュレーション結果表示用のインフレ適用後の月額支出
+        inflated_monthly_expenditure_for_display_yen = (current_base_monthly_exp_thousand_yen * 1000) * ((1 + inflation_rate)**(year - 1))
+
 
         # 保険料の年間支出 (円) - インフレ適用なし
         annual_insurance_premium_yen = 0
@@ -244,8 +253,8 @@ def simulate_life_plan(data):
                             annual_school_enrollment_cost_yen += school_info["annual_cost"] * 10000 # 万円を円に
 
         # その他一時支出金 (円) - インフレ適用なし
-        annual_other_lump_expenditure_yen = 0 # 名称変更
-        for lump_sum in other_lump_expenditures: # 変数名変更
+        annual_other_lump_expenditure_yen = 0
+        for lump_sum in other_lump_expenditures:
             if lump_sum["year"] == year:
                 annual_other_lump_expenditure_yen += lump_sum["amount"] * 10000 # 万円を円に
 
@@ -255,14 +264,8 @@ def simulate_life_plan(data):
         # 年間収支 (円)
         annual_balance_yen = annual_income_yen - current_annual_total_expenditure_yen
 
-        # 満期保険の受取処理 (円)
-        annual_insurance_payout_yen = 0 # 新規
-        for policy in insurance_policies:
-            if policy["maturity_year"] > 0 and year == policy["maturity_year"]:
-                annual_insurance_payout_yen += policy["payout_amount"] * 10000 # 万円を円に
-        
-        # 資産の変動 (投資利回り考慮)
-        current_assets = current_assets * (1 + investment_return_rate) + annual_balance_yen + annual_insurance_payout_yen # 満期金は収支に含まれないので別途加算
+        # 資産の変動 (投資利回り考慮) - 満期金は既に収入に加算されているため、ここでは加算しない
+        current_assets = current_assets * (1 + investment_return_rate) + annual_balance_yen
 
         row_data = {
             "年": year,
@@ -271,20 +274,17 @@ def simulate_life_plan(data):
             "年間支出": int(current_annual_total_expenditure_yen),
             "年間収支": int(annual_balance_yen),
             "年末資産": int(current_assets),
-            "月額支出合計（再掲）": int(current_base_monthly_exp_thousand_yen * 1000), # 千円を円に
+            "月額支出合計（再掲）": int(inflated_monthly_expenditure_for_display_yen), # インフレ適用後の月額支出
             "保険支出（再掲）": int(annual_insurance_premium_yen),
             "住宅ローン額（再掲）": int(annual_housing_loan_payment_yen),
             "学校一時金（再掲）": int(annual_school_lump_sum_yen),
             "学校在学費用（再掲）": int(annual_school_enrollment_cost_yen),
-            "その他一時支出金（再掲）": int(annual_other_lump_expenditure_yen), # 名称変更
-            "保険満期金（再掲）": int(annual_insurance_payout_yen), # 新規
+            "その他一時支出金（再掲）": int(annual_other_lump_expenditure_yen),
+            "保険満期金（再掲）": int(annual_insurance_payout_yen),
         }
 
         # 家族メンバーのその年の年齢を追加
         member_age_data = {f"{name} 年齢": age for name, age in member_current_ages_in_sim.items()}
-        
-        # 順序を保持するためにOrderedDictやリストを使うのが一般的だが、
-        # Python 3.7+ のdictは挿入順序を保持するため、直接マージする
         
         # 指定された列順序
         ordered_columns = [
@@ -524,7 +524,7 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     # まず初期データ構造の対応するリストをクリアします。
     new_data["family"]["members"] = []
     new_data["insurance_policies"] = []
-    new_data["other_lump_expenditures"] = [] # 名称変更
+    new_data["other_lump_expenditures"] = []
 
     for index, row in df_uploaded.iterrows():
         item_path_str = str(row["項目"]) # Ensure item_path_str is always a string
@@ -591,7 +591,7 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
                             current_level.append({"name": "", "initial_age": 0})
                         elif parent_key_for_list == "insurance_policies":
                             current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1})
-                        elif parent_key_for_list == "other_lump_expenditures": # 名称変更
+                        elif parent_key_for_list == "other_lump_expenditures":
                             current_level.append({"name": "", "amount": 0, "year": 0})
                         else:
                             current_level.append({}) # Generic dict if type unknown
@@ -648,10 +648,26 @@ def main():
     uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["csv"])
     if uploaded_file is not None:
         try:
-            # アップロードされたデータをセッションステートに反映
             df_uploaded = pd.read_csv(uploaded_file)
-            st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
-            st.success("データが正常にアップロードされ、反映されました！")
+            
+            # Store the uploaded DataFrame for viewing later
+            st.session_state.uploaded_csv_df = df_uploaded.copy()
+
+            # Get expected columns from initial data structure for version check
+            expected_df_for_comparison = pd.DataFrame(flatten_data_for_csv(get_initial_data()))
+            expected_columns = set(expected_df_for_comparison["項目"].tolist())
+            
+            # Assuming '項目' column exists in uploaded CSV
+            uploaded_columns = set(df_uploaded["項目"].tolist()) 
+
+            # Check for structural compatibility
+            if uploaded_columns != expected_columns:
+                st.warning("アップロードされたCSVの項目が現在のアプリのバージョンと異なります。正しく読み込めない可能性があります。")
+                st.info("現在のアプリのバージョンに合わせたCSVをダウンロードし、データを移行することをお勧めします。")
+                st.session_state.data = get_initial_data() # Reset to default if structure is incompatible
+            else:
+                st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
+                st.success("データが正常にアップロードされ、反映されました！")
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
             # エラー時に初期データを再設定
@@ -661,6 +677,13 @@ def main():
         # アプリ初回起動時やファイルがアップロードされていない場合に初期データを設定
         if "data" not in st.session_state:
             st.session_state.data = get_initial_data()
+
+    # Button to view previous CSV content
+    if st.session_state.get("uploaded_csv_df") is not None:
+        if st.button("アップロードしたCSVの中身を確認"):
+            st.subheader("アップロードしたCSVの内容")
+            st.dataframe(st.session_state.uploaded_csv_df, use_container_width=True)
+
 
     # --- ライフプラン設定セクション ---
     st.header("2. ライフプラン設定")
@@ -875,31 +898,31 @@ def main():
             st.session_state.insurance_count -= 1
             st.rerun()
 
-        st.subheader("その他一時支出金") # 名称変更
+        st.subheader("その他一時支出金")
         # その他一時支出金の動的な追加・削除
-        if "other_lump_expenditures_count" not in st.session_state: # 変数名変更
-            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"]) # 変数名変更
-        elif st.session_state.other_lump_expenditures_count != len(st.session_state.data["other_lump_expenditures"]): # 変数名変更
-            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"]) # 変数名変更
+        if "other_lump_expenditures_count" not in st.session_state:
+            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"])
+        elif st.session_state.other_lump_expenditures_count != len(st.session_state.data["other_lump_expenditures"]):
+            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"])
 
-        for i in range(st.session_state.other_lump_expenditures_count): # 変数名変更
-            st.markdown(f"**一時支出 {i+1}**") # 表示テキスト変更
-            if i >= len(st.session_state.data["other_lump_expenditures"]): # 変数名変更
-                st.session_state.data["other_lump_expenditures"].append({"name": "", "amount": 0, "year": 0}) # 変数名変更
+        for i in range(st.session_state.other_lump_expenditures_count):
+            st.markdown(f"**一時支出 {i+1}**")
+            if i >= len(st.session_state.data["other_lump_expenditures"]):
+                st.session_state.data["other_lump_expenditures"].append({"name": "", "amount": 0, "year": 0})
 
-            lump_sum_item = st.session_state.data["other_lump_expenditures"][i] # 変数名変更
-            lump_sum_item["name"] = st.text_input(f"一時支出名", value=lump_sum_item["name"], key=f"other_lump_expenditure_name_{i}") # 変数名変更
-            lump_sum_item["amount"] = st.number_input(f"金額 (万円)", min_value=0, value=lump_sum_item["amount"], step=10, key=f"other_lump_expenditure_amount_{i}") # 変数名変更
-            lump_sum_item["year"] = st.number_input(f"発生年 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=lump_sum_item["year"], step=1, key=f"other_lump_expenditure_year_{i}") # 変数名変更
+            lump_sum_item = st.session_state.data["other_lump_expenditures"][i]
+            lump_sum_item["name"] = st.text_input(f"一時支出名", value=lump_sum_item["name"], key=f"other_lump_expenditure_name_{i}")
+            lump_sum_item["amount"] = st.number_input(f"金額 (万円)", min_value=0, value=lump_sum_item["amount"], step=10, key=f"other_lump_expenditure_amount_{i}")
+            lump_sum_item["year"] = st.number_input(f"発生年 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=lump_sum_item["year"], step=1, key=f"other_lump_expenditure_year_{i}")
 
-        if st.button("その他一時支出金を追加", key="add_other_lump_expenditure_btn"): # 名称変更
-            st.session_state.data["other_lump_expenditures"].append({"name": f"新規一時支出 {st.session_state.other_lump_expenditures_count + 1}", "amount": 0, "year": 0}) # 名称変更
-            st.session_state.other_lump_expenditures_count += 1 # 変数名変更
+        if st.button("その他一時支出金を追加", key="add_other_lump_expenditure_btn"):
+            st.session_state.data["other_lump_expenditures"].append({"name": f"新規一時支出 {st.session_state.other_lump_expenditures_count + 1}", "amount": 0, "year": 0})
+            st.session_state.other_lump_expenditures_count += 1
             st.rerun()
 
-        if st.session_state.other_lump_expenditures_count > 0 and st.button("最後のその他一時支出金を削除", key="remove_other_lump_expenditure_btn"): # 名称変更
-            st.session_state.data["other_lump_expenditures"].pop() # 変数名変更
-            st.session_state.other_lump_expenditures_count -= 1 # 変数名変更
+        if st.session_state.other_lump_expenditures_count > 0 and st.button("最後のその他一時支出金を削除", key="remove_other_lump_expenditure_btn"):
+            st.session_state.data["other_lump_expenditures"].pop()
+            st.session_state.other_lump_expenditures_count -= 1
             st.rerun()
 
 
@@ -917,7 +940,7 @@ def main():
     # --- シミュレーション結果 ---
     st.header("3. シミュレーション結果")
     st.markdown("設定したライフプランに基づいた将来の資産推移です。")
-    st.markdown("※「月額支出合計」「保険支出」「住宅ローン額」「学校一時金」「学校在学費用」「その他一時支出金」「保険満期金」は、それぞれの支出項目からの**再掲**です。") # 再掲であることを記載
+    st.markdown("※「月額支出合計」「保険支出」「住宅ローン額」「学校一時金」「学校在学費用」「その他一時支出金」「保険満期金」は、それぞれの支出項目からの**再掲**です。")
 
     if st.session_state.run_simulation:
         simulation_df = simulate_life_plan(st.session_state.data)
@@ -954,7 +977,12 @@ def main():
 
         st.dataframe(styled_df, use_container_width=True)
 
-        st.line_chart(simulation_df.set_index("年")["年末資産"])
+        # グラフの線の色を条件付きで変更
+        line_chart_color = "blue" # デフォルトの色
+        if not simulation_df.empty and simulation_df['年末資産'].min() < 0:
+            line_chart_color = "red" # 赤字になったら赤色にする
+
+        st.line_chart(simulation_df.set_index("年")["年末資産"], color=line_chart_color)
 
         # マイナスになる年数と最大マイナス額の表示
         negative_assets_df = simulation_df[simulation_df['年末資産'] < 0]
@@ -985,7 +1013,7 @@ def main():
     # --- AIによる改善提案 ---
     st.header("4. AIによる改善提案")
     st.markdown("あなたのライフプランに関する情報を入力すると、AIが改善点を提案します。")
-    st.info("AIによる改善提案は、現在**定型文**であることを記載しています。") # 定型文であることを記載
+    st.info("AIによる改善提案は、現在**定型文**であることを記載しています。")
 
     user_plan_description = st.text_area(
         "あなたのライフプランについて、目標や課題、現在の状況などを具体的に教えてください。",
