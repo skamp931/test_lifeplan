@@ -251,6 +251,46 @@ qa_data = [
     {"q": "住宅ローンのシミュレーションはできますか？", "a": "直接的な住宅ローンシミュレーション機能はありませんが、毎月の返済額を「支出」に加えることで、全体への影響を把握できます。"}
 ]
 
+# --- 各項目の期待される型を定義するマップ ---
+# CSVからの読み込み時にこのマップを使って型変換を行う
+TYPE_MAP = {
+    "family.adults": int,
+    "family.children": int,
+    "family.years_to_simulate": int,
+    "family.initial_assets": int,
+    "family.investment_return_rate": float,
+    "family.inflation_rate": float,
+    "family.income_growth_rate": float,
+
+    "income.monthly_salary_main": int,
+    "income.monthly_salary_sub": int,
+    "income.bonus_annual": int,
+
+    "expenditure.housing": int,
+    "expenditure.food": int,
+    "expenditure.transportation": int,
+    "expenditure.education": int,
+    "expenditure.utilities": int,
+    "expenditure.communication": int,
+    "expenditure.leisure": int,
+    "expenditure.medical": int,
+    "expenditure.other": int,
+
+    "temporary_expenditures.education_lump_sum_year": int,
+    "temporary_expenditures.education_lump_sum_amount": int,
+    "temporary_expenditures.housing_lump_sum_year": int,
+    "temporary_expenditures.housing_lump_sum_amount": int,
+
+    "insurance.life_insurance_monthly_premium": int,
+    "insurance.endowment_insurance_monthly_premium": int,
+    "insurance.endowment_insurance_maturity_year": int,
+    "insurance.endowment_insurance_payout_amount": int,
+
+    "housing_loan.loan_amount": int,
+    "housing_loan.loan_interest_rate": float,
+    "housing_loan.loan_term_years": int,
+}
+
 # --- データをフラット化してCSV用に変換するヘルパー関数 ---
 def flatten_data_for_csv(data_dict):
     flattened = []
@@ -265,33 +305,41 @@ def flatten_data_for_csv(data_dict):
 # --- CSVからデータを読み込み、ネストされた辞書に変換するヘルパー関数 ---
 def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     new_data = initial_data_structure.copy() # 初期構造をコピーして変更
+
     for index, row in df_uploaded.iterrows():
-        item_path = row["項目"].split('.')
+        item_path_str = row["項目"]
         value = row["値"]
 
-        # 型変換を試みる
-        if isinstance(value, str):
+        # TYPE_MAPから期待される型を取得
+        target_type = TYPE_MAP.get(item_path_str)
+
+        if target_type:
             try:
-                # Attempt float conversion first
-                float_value = float(value)
-                # Check if it's an integer in float form (e.g., 2.0)
-                if float_value == int(float_value):
-                    value = int(float_value)
+                # pandasが数値を読み込む際にNaNになることがあるため、NaNチェック
+                if pd.isna(value):
+                    # NaNの場合、デフォルト値（0や0.0）を設定するか、Noneにするか検討
+                    # number_inputはNoneを受け入れないので、0を設定するのが安全
+                    value = 0 if target_type == int else 0.0
                 else:
-                    value = float_value
-            except ValueError:
-                pass # Keep as string if not convertible to number
+                    value = target_type(value)
+            except (ValueError, TypeError):
+                # 型変換に失敗した場合の処理
+                st.warning(f"Warning: Could not convert '{value}' for '{item_path_str}' to {target_type.__name__}. Using default value (0 or 0.0).")
+                value = 0 if target_type == int else 0.0 # デフォルト値を設定してエラーを回避
+        # else: # TYPE_MAPにない項目はそのままの値を使用 (現状は全ての項目がマップにあるはず)
+        #     pass
 
         current_dict = new_data
-        for i, key in enumerate(item_path):
-            if i == len(item_path) - 1:
-                # Final element, set the value
-                current_dict[key] = value
+        path_parts = item_path_str.split('.')
+        for i, key_part in enumerate(path_parts):
+            if i == len(path_parts) - 1:
+                # 最終要素は値を設定
+                current_dict[key_part] = value
             else:
-                # Intermediate element, ensure it's a dictionary
-                if key not in current_dict or not isinstance(current_dict[key], dict):
-                    current_dict[key] = {}
-                current_dict = current_dict[key]
+                # 中間要素は辞書が存在するか確認し、なければ作成
+                if key_part not in current_dict or not isinstance(current_dict[key_part], dict):
+                    current_dict[key_part] = {}
+                current_dict = current_dict[key_part]
     return new_data
 
 
