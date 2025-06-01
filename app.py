@@ -26,8 +26,14 @@ def get_initial_data():
         },
         "income": {
             "monthly_salary_main": 30, # 主たる月収 (万円)
-            "monthly_salary_sub": 0,      # 副業月収 (万円)
-            "bonus_annual": 60        # 年間ボーナス (万円)
+            "monthly_salary_sub": 0,      # 副収入 (万円)
+            "bonus_annual": 60,        # 年間ボーナス (万円)
+            "monthly_salary_main_at_60": 0, # 60歳時の主たる月収 (万円)
+            "monthly_salary_sub_at_60": 0,  # 60歳時の副業月収 (万円)
+            "bonus_annual_at_60": 0,    # 60歳時の年間ボーナス (万円)
+            "monthly_salary_main_at_65": 0, # 65歳時の主たる月収 (万円)
+            "monthly_salary_sub_at_65": 0,  # 65歳時の副業月収 (万円)
+            "bonus_annual_at_65": 0     # 65歳時の年間ボーナス (万円)
         },
         "expenditure": { # 月額支出 (千円)
             "housing": 100, # 10万円 = 100千円
@@ -38,18 +44,38 @@ def get_initial_data():
             "communication": 10,
             "leisure": 30,
             "medical": 10,
-            "other": 20
+            "other": 20,
+            "housing_at_60": 0, # 60歳時の住居費 (千円)
+            "food_at_60": 0,
+            "transportation_at_60": 0,
+            "education_at_60": 0,
+            "utilities_at_60": 0,
+            "communication_at_60": 0,
+            "leisure_at_60": 0,
+            "medical_at_60": 0,
+            "other_at_60": 0,
+            "housing_at_65": 0, # 65歳時の住居費 (千円)
+            "food_at_65": 0,
+            "transportation_at_65": 0,
+            "education_at_65": 0,
+            "utilities_at_65": 0,
+            "communication_at_65": 0,
+            "leisure_at_65": 0,
+            "medical_at_65": 0,
+            "other_at_65": 0
         },
-        "school_lump_sums": { # 学校一時金 (万円)
-            "kindergarten": {"amount": 50, "start_age": 3}, # 幼稚園入園時に発生する費用
-            "elementary_school": {"amount": 100, "start_age": 6}, # 小学校入学時に発生する費用
-            "junior_high_school": {"amount": 150, "start_age": 12}, # 中学校入学時に発生する費用
-            "high_school": {"amount": 200, "start_age": 15}, # 高校入学時に発生する費用
-            "university": {"amount": 300, "start_age": 18}, # 大学入学時に発生する費用
+        "school_lump_sums": { # 学校一時金 (万円) と年間在学費用 (万円)
+            "kindergarten": {"amount": 50, "start_age": 3, "duration": 3, "annual_cost": 30}, # 幼稚園: 3歳入園, 3年間, 年間30万円
+            "elementary_school": {"amount": 100, "start_age": 6, "duration": 6, "annual_cost": 50}, # 小学校: 6歳入学, 6年間, 年間50万円
+            "junior_high_school": {"amount": 150, "start_age": 12, "duration": 3, "annual_cost": 70}, # 中学校: 12歳入学, 3年間, 年間70万円
+            "high_school": {"amount": 200, "start_age": 15, "duration": 3, "annual_cost": 80}, # 高校: 15歳入学, 3年間, 年間80万円
+            "university": {"amount": 300, "start_age": 18, "duration": 4, "annual_cost": 120}, # 大学: 18歳入学, 4年間, 年間120万円
         },
         "insurance_policies": [ # 保険をリストで管理
             # {"name": "生命保険A", "monthly_premium": 10000, "maturity_year": 0, "payout_amount": 0}, # 満期年数0は満期なし
-            # {"name": "学資保険B", "monthly_premium": 5000, "maturity_year": 18, "payout_amount": 200},
+        ],
+        "other_lump_sums": [ # その他一時金 (万円)
+            # {"name": "車購入", "amount": 300, "year": 5},
         ],
         "housing_loan": {
             "loan_amount": 0, # 借入額 (万円)
@@ -87,10 +113,11 @@ def simulate_life_plan(data):
     年間収入、年間支出、住宅ローン額、学校一時金、年間収支、年末資産を計算します。
     """
     family = data["family"]
-    income = data["income"]
-    expenditure = data["expenditure"]
+    income_config = data["income"]
+    expenditure_config = data["expenditure"]
     school_lump_sums_config = data["school_lump_sums"]
     insurance_policies = data["insurance_policies"]
+    other_lump_sums = data["other_lump_sums"] # 新規
     housing_loan = data["housing_loan"]
 
     years_to_simulate = family["years_to_simulate"]
@@ -103,15 +130,21 @@ def simulate_life_plan(data):
     results = []
     current_assets = initial_assets
 
-    # 現在の収入を追跡するための変数 (円単位)
-    current_monthly_salary_main_yen = income["monthly_salary_main"] * 10000
-    current_monthly_salary_sub_yen = income["monthly_salary_sub"] * 10000
-    current_bonus_annual_yen = income["bonus_annual"] * 10000
+    # 現在の収入と支出を追跡するための変数 (円単位、千円単位)
+    # これらはシミュレーション中に年齢に応じて変化する可能性がある
+    current_monthly_salary_main_yen = income_config["monthly_salary_main"] * 10000
+    current_monthly_salary_sub_yen = income_config["monthly_salary_sub"] * 10000
+    current_bonus_annual_yen = income_config["bonus_annual"] * 10000
 
-    # 家族メンバーの現在の年齢を追跡 (初期化はループ外で)
-    # シミュレーション開始時の年齢をコピーして使用
+    current_expenditure_values_thousand_yen = {k: v for k, v in expenditure_config.items() if not k.endswith(('_at_60', '_at_65'))}
+
+
+    # 家族メンバーの現在の年齢を追跡 (シミュレーション開始時の年齢をコピー)
     member_current_ages_in_sim = {member["name"]: member["initial_age"] for member in family["members"]}
 
+    # 年齢による収入・支出変化のフラグ
+    income_exp_changed_at_60 = False
+    income_exp_changed_at_65 = False
 
     # 住宅ローンの月額返済額を事前に計算 (円)
     monthly_loan_payment_yen = calculate_monthly_loan_payment(
@@ -126,11 +159,50 @@ def simulate_life_plan(data):
             current_monthly_salary_main_yen *= (1 + income_growth_rate)
             current_bonus_annual_yen *= (1 + income_growth_rate)
 
+        # メンバーの年齢に応じた収入・支出の変化
+        # 最初のメンバーの年齢をトリガーとする (簡略化のため)
+        if family["members"]:
+            first_member_name = family["members"][0]["name"]
+            first_member_age_in_year = member_current_ages_in_sim[first_member_name] # この年の開始時の年齢
+
+            if not income_exp_changed_at_60 and first_member_age_in_year >= 60:
+                if income_config["monthly_salary_main_at_60"] > 0 or income_config["monthly_salary_sub_at_60"] > 0 or income_config["bonus_annual_at_60"] > 0:
+                    current_monthly_salary_main_yen = income_config["monthly_salary_main_at_60"] * 10000
+                    current_monthly_salary_sub_yen = income_config["monthly_salary_sub_at_60"] * 10000
+                    current_bonus_annual_yen = income_config["bonus_annual_at_60"] * 10000
+                
+                # 60歳時の支出を適用 (0でない場合のみ)
+                for key_exp in ['housing', 'food', 'transportation', 'education', 'utilities', 'communication', 'leisure', 'medical', 'other']:
+                    if expenditure_config[f"{key_exp}_at_60"] > 0:
+                        current_expenditure_values_thousand_yen[key_exp] = expenditure_config[f"{key_exp}_at_60"]
+
+                income_exp_changed_at_60 = True
+                # 60歳時の収入・支出が適用されたら、以降の収入上昇率の影響は受けないようにする
+                # ただし、ここでは収入上昇率のロジックはそのまま残し、
+                # 60歳時の設定が優先されるようにする。
+                # より厳密には、60歳以降の収入上昇率を別途設定する必要がある。
+                # 今回は、60歳時の設定が適用されたら、それ以降は60歳時の設定がベースになる。
+
+            if not income_exp_changed_at_65 and first_member_age_in_year >= 65:
+                if income_config["monthly_salary_main_at_65"] > 0 or income_config["monthly_salary_sub_at_65"] > 0 or income_config["bonus_annual_at_65"] > 0:
+                    current_monthly_salary_main_yen = income_config["monthly_salary_main_at_65"] * 10000
+                    current_monthly_salary_sub_yen = income_config["monthly_salary_sub_at_65"] * 10000
+                    current_bonus_annual_yen = income_config["bonus_annual_at_65"] * 10000
+
+                # 65歳時の支出を適用 (0でない場合のみ)
+                for key_exp in ['housing', 'food', 'transportation', 'education', 'utilities', 'communication', 'leisure', 'medical', 'other']:
+                    if expenditure_config[f"{key_exp}_at_65"] > 0:
+                        current_expenditure_values_thousand_yen[key_exp] = expenditure_config[f"{key_exp}_at_65"]
+                
+                income_exp_changed_at_65 = True
+                # 65歳時の収入・支出が適用されたら、以降の収入上昇率の影響は受けないようにする。
+
         # 年間収入の計算 (円)
         annual_income_yen = (current_monthly_salary_main_yen + current_monthly_salary_sub_yen) * 12 + current_bonus_annual_yen
 
         # 基本年間支出の計算 (千円を円に、インフレ考慮)
-        base_annual_expenditure_yen = sum(expenditure.values()) * 1000 * 12 # 千円を円に
+        # 現在の支出設定 (年齢による変化が適用されたもの) を使用
+        base_annual_expenditure_yen = sum(current_expenditure_values_thousand_yen.values()) * 1000 * 12 # 千円を円に
         inflated_base_annual_expenditure_yen = base_annual_expenditure_yen * ((1 + inflation_rate)**(year - 1))
 
         # 保険料の年間支出 (円)
@@ -143,16 +215,31 @@ def simulate_life_plan(data):
 
         # 学校一時金の年間支出 (円)
         annual_school_lump_sum_yen = 0
-        for member_name, age in member_current_ages_in_sim.items():
-            # current_age_in_year はその年の開始時の年齢
-            if age > 0: # 年齢が設定されているメンバーのみ考慮
+        # 学校在学費用 (円)
+        annual_school_enrollment_cost_yen = 0
+
+        for member_name, age_in_sim_start_of_year in member_current_ages_in_sim.items():
+            # その年の開始時の年齢
+            if age_in_sim_start_of_year > 0: # 年齢が設定されているメンバーのみ考慮
                 for school_type, school_info in school_lump_sums_config.items():
-                    # 学校開始年齢が設定されており、かつ現在の年齢と一致する場合に計上
-                    if school_info["start_age"] > 0 and age == school_info["start_age"]:
+                    # 一時金
+                    if school_info["start_age"] > 0 and age_in_sim_start_of_year == school_info["start_age"]:
                         annual_school_lump_sum_yen += school_info["amount"] * 10000 # 万円を円に
+                    
+                    # 在学費用
+                    if school_info["start_age"] > 0 and school_info["duration"] > 0:
+                        enrollment_end_age = school_info["start_age"] + school_info["duration"] - 1
+                        if school_info["start_age"] <= age_in_sim_start_of_year <= enrollment_end_age:
+                            annual_school_enrollment_cost_yen += school_info["annual_cost"] * 10000 # 万円を円に
+
+        # その他一時金 (円)
+        annual_other_lump_sum_yen = 0
+        for lump_sum in other_lump_sums:
+            if lump_sum["year"] == year:
+                annual_other_lump_sum_yen += lump_sum["amount"] * 10000 # 万円を円に
 
         # 合計年間支出
-        current_annual_expenditure_yen = inflated_base_annual_expenditure_yen + annual_insurance_premium_yen + annual_housing_loan_payment_yen + annual_school_lump_sum_yen
+        current_annual_expenditure_yen = inflated_base_annual_expenditure_yen + annual_insurance_premium_yen + annual_housing_loan_payment_yen + annual_school_lump_sum_yen + annual_school_enrollment_cost_yen + annual_other_lump_sum_yen
 
         # 年間収支 (円)
         annual_balance_yen = annual_income_yen - current_annual_expenditure_yen
@@ -171,6 +258,8 @@ def simulate_life_plan(data):
             "年間支出": int(current_annual_expenditure_yen),
             "住宅ローン額": int(annual_housing_loan_payment_yen),
             "学校一時金": int(annual_school_lump_sum_yen),
+            "学校在学費用": int(annual_school_enrollment_cost_yen), # 新規
+            "その他一時金": int(annual_other_lump_sum_yen), # 新規
             "年間収支": int(annual_balance_yen),
             "年末資産": int(current_assets)
         }
@@ -291,6 +380,12 @@ TYPE_MAP = {
     "income.monthly_salary_main": int, # 万円
     "income.monthly_salary_sub": int,  # 万円
     "income.bonus_annual": int,        # 万円
+    "income.monthly_salary_main_at_60": int, # 万円
+    "income.monthly_salary_sub_at_60": int,  # 万円
+    "income.bonus_annual_at_60": int,        # 万円
+    "income.monthly_salary_main_at_65": int, # 万円
+    "income.monthly_salary_sub_at_65": int,  # 万円
+    "income.bonus_annual_at_65": int,        # 万円
 
     "expenditure.housing": int, # 千円
     "expenditure.food": int,
@@ -301,17 +396,45 @@ TYPE_MAP = {
     "expenditure.leisure": int,
     "expenditure.medical": int,
     "expenditure.other": int,
+    "expenditure.housing_at_60": int, # 千円
+    "expenditure.food_at_60": int,
+    "expenditure.transportation_at_60": int,
+    "expenditure.education_at_60": int,
+    "expenditure.utilities_at_60": int,
+    "expenditure.communication_at_60": int,
+    "expenditure.leisure_at_60": int,
+    "expenditure.medical_at_60": int,
+    "expenditure.other_at_60": int,
+    "expenditure.housing_at_65": int, # 千円
+    "expenditure.food_at_65": int,
+    "expenditure.transportation_at_65": int,
+    "expenditure.education_at_65": int,
+    "expenditure.utilities_at_65": int,
+    "expenditure.communication_at_65": int,
+    "expenditure.leisure_at_65": int,
+    "expenditure.medical_at_65": int,
+    "expenditure.other_at_65": int,
 
     "school_lump_sums.kindergarten.amount": int, # 万円
     "school_lump_sums.kindergarten.start_age": int,
+    "school_lump_sums.kindergarten.duration": int,
+    "school_lump_sums.kindergarten.annual_cost": int, # 万円
     "school_lump_sums.elementary_school.amount": int, # 万円
     "school_lump_sums.elementary_school.start_age": int,
+    "school_lump_sums.elementary_school.duration": int,
+    "school_lump_sums.elementary_school.annual_cost": int, # 万円
     "school_lump_sums.junior_high_school.amount": int, # 万円
     "school_lump_sums.junior_high_school.start_age": int,
+    "school_lump_sums.junior_high_school.duration": int,
+    "school_lump_sums.junior_high_school.annual_cost": int, # 万円
     "school_lump_sums.high_school.amount": int, # 万円
     "school_lump_sums.high_school.start_age": int,
+    "school_lump_sums.high_school.duration": int,
+    "school_lump_sums.high_school.annual_cost": int, # 万円
     "school_lump_sums.university.amount": int, # 万円
     "school_lump_sums.university.start_age": int,
+    "school_lump_sums.university.duration": int,
+    "school_lump_sums.university.annual_cost": int, # 万円
 
     "housing_loan.loan_amount": int, # 万円
     "housing_loan.loan_interest_rate": float,
@@ -322,9 +445,11 @@ TYPE_MAP = {
 DYNAMIC_LIST_ITEM_TYPE_MAP = {
     "name": str,
     "initial_age": int,
-    "monthly_premium": int,
+    "monthly_premium": int, # 円
     "maturity_year": int,
     "payout_amount": int, # 万円
+    "amount": int, # 万円 (other_lump_sums用)
+    "year": int,   # (other_lump_sums用)
 }
 
 # --- データをフラット化してCSV用に変換するヘルパー関数 ---
@@ -349,11 +474,11 @@ def flatten_data_for_csv(data_dict, parent_key=''):
 def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     new_data = initial_data_structure.copy() # 初期構造をコピーして変更
 
-    # 動的なリスト（家族メンバー、保険）をCSVから再構築するために、
+    # 動的なリスト（家族メンバー、保険、その他一時金）をCSVから再構築するために、
     # まず初期データ構造の対応するリストをクリアします。
-    # これにより、CSVに存在するデータのみがロードされ、古いデータが残るのを防ぎます。
     new_data["family"]["members"] = []
     new_data["insurance_policies"] = []
+    new_data["other_lump_sums"] = []
 
     for index, row in df_uploaded.iterrows():
         item_path_str = str(row["項目"]) # Ensure item_path_str is always a string
@@ -399,7 +524,14 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
                             pass # Keep as string if not convertible
 
                 # Assign the processed value to the final key
-                current_level[key_part] = processed_value
+                if isinstance(current_level, dict):
+                    current_level[key_part] = processed_value
+                elif isinstance(current_level, list):
+                    # This case should ideally not be reached with the current flatten/unflatten logic
+                    # where list items are always dicts and their keys are handled.
+                    # If it is, it means the CSV structure is unexpected.
+                    st.error(f"Error: Unexpected list assignment for path '{item_path_str}'. Value: {processed_value}")
+                    pass # Log error and continue
                 
             else: # 中間要素 (辞書またはリストのキー/インデックス)
                 if key_part.isdigit(): # リストのインデックスの場合
@@ -416,6 +548,8 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
                             current_level.append({"name": "", "initial_age": 0})
                         elif parent_key_for_list == "insurance_policies":
                             current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
+                        elif parent_key_for_list == "other_lump_sums": # 新規
+                            current_level.append({"name": "", "amount": 0, "year": 0})
                         else:
                             current_level.append({}) # Generic dict if type unknown
                     current_level = current_level[idx] # 次のレベル（リスト内の辞書）に進む
@@ -458,7 +592,6 @@ def main():
             df_uploaded = pd.read_csv(uploaded_file)
             st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
             st.success("データが正常にアップロードされ、反映されました！")
-            # アップロードされたデータの表示は削除済み
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
             # エラー時に初期データを再設定
@@ -479,10 +612,8 @@ def main():
     with col1:
         st.subheader("家族構成・基本設定")
         # 家族メンバーの動的な追加・削除
-        # st.session_state.data["family"]["members"] の初期化と整合性を確保
         if "members_count" not in st.session_state:
             st.session_state.members_count = len(st.session_state.data["family"]["members"])
-        # アップロード後に members_count がデータと一致するように調整
         elif st.session_state.members_count != len(st.session_state.data["family"]["members"]):
              st.session_state.members_count = len(st.session_state.data["family"]["members"])
 
@@ -554,17 +685,14 @@ def main():
             min_value=0, value=st.session_state.data["income"]["bonus_annual"], step=10, key="bonus_annual_input"
         )
 
-        st.subheader("学校一時金 (万円)")
-        st.markdown("各学校の入学時に発生する平均的な費用です。")
-        for school_type, school_info in st.session_state.data["school_lump_sums"].items():
-            st.session_state.data["school_lump_sums"][school_type]["amount"] = st.number_input(
-                f"{school_type.replace('_', ' ').title()} 費用",
-                min_value=0, value=school_info["amount"], step=10, key=f"school_{school_type}_amount"
-            )
-            st.session_state.data["school_lump_sums"][school_type]["start_age"] = st.number_input(
-                f"{school_type.replace('_', ' ').title()} 開始年齢",
-                min_value=0, max_value=30, value=school_info["start_age"], step=1, key=f"school_{school_type}_age"
-            )
+        st.subheader("年齢に応じた収入変化 (最初のメンバーが到達時)")
+        st.markdown("※0の場合は基本収入が継続されます。")
+        st.session_state.data["income"]["monthly_salary_main_at_60"] = st.number_input("60歳時 主たる月収 (万円)", min_value=0, value=st.session_state.data["income"]["monthly_salary_main_at_60"], step=10, key="salary_main_60")
+        st.session_state.data["income"]["monthly_salary_sub_at_60"] = st.number_input("60歳時 副業月収 (万円)", min_value=0, value=st.session_state.data["income"]["monthly_salary_sub_at_60"], step=5, key="salary_sub_60")
+        st.session_state.data["income"]["bonus_annual_at_60"] = st.number_input("60歳時 年間賞与 (万円)", min_value=0, value=st.session_state.data["income"]["bonus_annual_at_60"], step=10, key="bonus_annual_60")
+        st.session_state.data["income"]["monthly_salary_main_at_65"] = st.number_input("65歳時 主たる月収 (万円)", min_value=0, value=st.session_state.data["income"]["monthly_salary_main_at_65"], step=10, key="salary_main_65")
+        st.session_state.data["income"]["monthly_salary_sub_at_65"] = st.number_input("65歳時 副業月収 (万円)", min_value=0, value=st.session_state.data["income"]["monthly_salary_sub_at_65"], step=5, key="salary_sub_65")
+        st.session_state.data["income"]["bonus_annual_at_65"] = st.number_input("65歳時 年間賞与 (万円)", min_value=0, value=st.session_state.data["income"]["bonus_annual_at_65"], step=10, key="bonus_annual_65")
 
 
     with col3:
@@ -579,7 +707,51 @@ def main():
         st.session_state.data["expenditure"]["medical"] = st.number_input("医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical"], step=1, key="medical_input")
         st.session_state.data["expenditure"]["other"] = st.number_input("その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other"], step=1, key="other_input")
 
+        st.subheader("年齢に応じた支出変化 (最初のメンバーが到達時)")
+        st.markdown("※0の場合は基本支出が継続されます。")
+        st.session_state.data["expenditure"]["housing_at_60"] = st.number_input("60歳時 住居費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["housing_at_60"], step=5, key="housing_60")
+        st.session_state.data["expenditure"]["food_at_60"] = st.number_input("60歳時 食費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["food_at_60"], step=1, key="food_60")
+        st.session_state.data["expenditure"]["transportation_at_60"] = st.number_input("60歳時 交通費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["transportation_at_60"], step=1, key="transportation_60")
+        st.session_state.data["expenditure"]["education_at_60"] = st.number_input("60歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_60"], step=1, key="education_60")
+        st.session_state.data["expenditure"]["utilities_at_60"] = st.number_input("60歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_60"], step=1, key="utilities_60")
+        st.session_state.data["expenditure"]["communication_at_60"] = st.number_input("60歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_60"], step=1, key="communication_60")
+        st.session_state.data["expenditure"]["leisure_at_60"] = st.number_input("60歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_60"], step=1, key="leisure_60")
+        st.session_state.data["expenditure"]["medical_at_60"] = st.number_input("60歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_60"], step=1, key="medical_60")
+        st.session_state.data["expenditure"]["other_at_60"] = st.number_input("60歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_60"], step=1, key="other_60")
+
+        st.session_state.data["expenditure"]["housing_at_65"] = st.number_input("65歳時 住居費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["housing_at_65"], step=5, key="housing_65")
+        st.session_state.data["expenditure"]["food_at_65"] = st.number_input("65歳時 食費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["food_at_65"], step=1, key="food_65")
+        st.session_state.data["expenditure"]["transportation_at_65"] = st.number_input("65歳時 交通費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["transportation_at_65"], step=1, key="transportation_65")
+        st.session_state.data["expenditure"]["education_at_65"] = st.number_input("65歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_65"], step=1, key="education_65")
+        st.session_state.data["expenditure"]["utilities_at_65"] = st.number_input("65歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_65"], step=1, key="utilities_65")
+        st.session_state.data["expenditure"]["communication_at_65"] = st.number_input("65歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_65"], step=1, key="communication_65")
+        st.session_state.data["expenditure"]["leisure_at_65"] = st.number_input("65歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_65"], step=1, key="leisure_65")
+        st.session_state.data["expenditure"]["medical_at_65"] = st.number_input("65歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_65"], step=1, key="medical_65")
+        st.session_state.data["expenditure"]["other_at_65"] = st.number_input("65歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_65"], step=1, key="other_65")
+
+
     with col4:
+        st.subheader("学校費用設定 (万円)")
+        st.markdown("各学校の入学時費用と在学中の年間費用です。")
+        for school_type, school_info in st.session_state.data["school_lump_sums"].items():
+            st.markdown(f"**{school_type.replace('_', ' ').title()}**")
+            st.session_state.data["school_lump_sums"][school_type]["amount"] = st.number_input(
+                f"{school_type.replace('_', ' ').title()} 入学時費用",
+                min_value=0, value=school_info["amount"], step=10, key=f"school_{school_type}_amount"
+            )
+            st.session_state.data["school_lump_sums"][school_type]["start_age"] = st.number_input(
+                f"{school_type.replace('_', ' ').title()} 開始年齢",
+                min_value=0, max_value=30, value=school_info["start_age"], step=1, key=f"school_{school_type}_age"
+            )
+            st.session_state.data["school_lump_sums"][school_type]["duration"] = st.number_input(
+                f"{school_type.replace('_', ' ').title()} 在学期間 (年)",
+                min_value=0, max_value=10, value=school_info["duration"], step=1, key=f"school_{school_type}_duration"
+            )
+            st.session_state.data["school_lump_sums"][school_type]["annual_cost"] = st.number_input(
+                f"{school_type.replace('_', ' ').title()} 年間在学費用",
+                min_value=0, value=school_info["annual_cost"], step=10, key=f"school_{school_type}_annual_cost"
+            )
+
         st.subheader("住宅ローン設定")
         st.session_state.data["housing_loan"]["loan_amount"] = st.number_input(
             "借入額 (万円)",
@@ -605,49 +777,57 @@ def main():
         # 保険の動的な追加・削除
         if "insurance_count" not in st.session_state:
             st.session_state.insurance_count = len(st.session_state.data["insurance_policies"])
-        # アップロード後に insurance_count がデータと一致するように調整
         elif st.session_state.insurance_count != len(st.session_state.data["insurance_policies"]):
             st.session_state.insurance_count = len(st.session_state.data["insurance_policies"])
 
 
         for i in range(st.session_state.insurance_count):
             st.markdown(f"**保険 {i+1}**")
-            # 保険リストが空の場合に備える
             if i >= len(st.session_state.data["insurance_policies"]):
                 st.session_state.data["insurance_policies"].append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
 
-            # ここで、valueが確実に数値型であることを確認
-            current_monthly_premium = st.session_state.data["insurance_policies"][i]["monthly_premium"]
-            if not isinstance(current_monthly_premium, (int, float)):
-                st.warning(f"Warning: Insurance {i+1} monthly premium was not numeric ({current_monthly_premium}). Setting to 0.")
-                current_monthly_premium = 0
-
-            current_maturity_year = st.session_state.data["insurance_policies"][i]["maturity_year"]
-            if not isinstance(current_maturity_year, (int, float)):
-                st.warning(f"Warning: Insurance {i+1} maturity year was not numeric ({current_maturity_year}). Setting to 0.")
-                current_maturity_year = 0
-
-            current_payout_amount = st.session_state.data["insurance_policies"][i]["payout_amount"]
-            if not isinstance(current_payout_amount, (int, float)):
-                st.warning(f"Warning: Insurance {i+1} payout amount was not numeric ({current_payout_amount}). Setting to 0.")
-                current_payout_amount = 0
-
-
             policy = st.session_state.data["insurance_policies"][i]
             policy["name"] = st.text_input(f"保険名", value=policy["name"], key=f"ins_name_{i}")
-            policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=current_monthly_premium, step=1000, key=f"ins_premium_{i}")
-            policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=current_maturity_year, step=1, key=f"ins_maturity_year_{i}")
-            policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=current_payout_amount, step=10, key=f"ins_payout_{i}")
+            policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=policy["monthly_premium"], step=1000, key=f"ins_premium_{i}")
+            policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["maturity_year"], step=1, key=f"ins_maturity_year_{i}")
+            policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=policy["payout_amount"], step=10, key=f"ins_payout_{i}")
 
         if st.button("保険を追加", key="add_insurance_btn"):
             st.session_state.data["insurance_policies"].append({"name": f"新規保険 {st.session_state.insurance_count + 1}", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0})
             st.session_state.insurance_count += 1
-            st.rerun() # st.experimental_rerun() を st.rerun() に変更
+            st.rerun()
 
         if st.session_state.insurance_count > 0 and st.button("最後の保険を削除", key="remove_insurance_btn"):
             st.session_state.data["insurance_policies"].pop()
             st.session_state.insurance_count -= 1
-            st.rerun() # st.experimental_rerun() を st.rerun() に変更
+            st.rerun()
+
+        st.subheader("その他一時金")
+        # その他一時金の動的な追加・削除
+        if "other_lump_sums_count" not in st.session_state:
+            st.session_state.other_lump_sums_count = len(st.session_state.data["other_lump_sums"])
+        elif st.session_state.other_lump_sums_count != len(st.session_state.data["other_lump_sums"]):
+            st.session_state.other_lump_sums_count = len(st.session_state.data["other_lump_sums"])
+
+        for i in range(st.session_state.other_lump_sums_count):
+            st.markdown(f"**一時金 {i+1}**")
+            if i >= len(st.session_state.data["other_lump_sums"]):
+                st.session_state.data["other_lump_sums"].append({"name": "", "amount": 0, "year": 0})
+
+            lump_sum_item = st.session_state.data["other_lump_sums"][i]
+            lump_sum_item["name"] = st.text_input(f"一時金名", value=lump_sum_item["name"], key=f"other_lump_sum_name_{i}")
+            lump_sum_item["amount"] = st.number_input(f"金額 (万円)", min_value=0, value=lump_sum_item["amount"], step=10, key=f"other_lump_sum_amount_{i}")
+            lump_sum_item["year"] = st.number_input(f"発生年 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=lump_sum_item["year"], step=1, key=f"other_lump_sum_year_{i}")
+
+        if st.button("その他一時金を追加", key="add_other_lump_sum_btn"):
+            st.session_state.data["other_lump_sums"].append({"name": f"新規一時金 {st.session_state.other_lump_sums_count + 1}", "amount": 0, "year": 0})
+            st.session_state.other_lump_sums_count += 1
+            st.rerun()
+
+        if st.session_state.other_lump_sums_count > 0 and st.button("最後のその他一時金を削除", key="remove_other_lump_sum_btn"):
+            st.session_state.data["other_lump_sums"].pop()
+            st.session_state.other_lump_sums_count -= 1
+            st.rerun()
 
 
     # --- シミュレーション実行ボタン ---
@@ -664,6 +844,7 @@ def main():
     # --- シミュレーション結果 ---
     st.header("3. シミュレーション結果")
     st.markdown("設定したライフプランに基づいた将来の資産推移です。")
+    st.markdown("※「住宅ローン額」と「学校一時金」は、それぞれの支出項目からの**再掲**です。") # 再掲であることを記載
 
     if st.session_state.run_simulation:
         simulation_df = simulate_life_plan(st.session_state.data)
@@ -674,6 +855,8 @@ def main():
             "年間支出": "{:,}円",
             "住宅ローン額": "{:,}円",
             "学校一時金": "{:,}円",
+            "学校在学費用": "{:,}円", # 新規
+            "その他一時金": "{:,}円", # 新規
             "年間収支": "{:,}円",
             "年末資産": "{:,}円"
             # メンバー年齢の列は自動的に表示されるため、ここでは特別なフォーマットは不要
