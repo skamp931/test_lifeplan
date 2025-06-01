@@ -978,11 +978,12 @@ def main():
         st.dataframe(styled_df, use_container_width=True)
 
         # グラフの線の色を条件付きで変更
-        line_chart_color = "blue" # デフォルトの色
+        line_chart_color_hex = "#1f77b4" # デフォルトの青色 (Streamlitのデフォルトに合わせる)
         if not simulation_df.empty and simulation_df['年末資産'].min() < 0:
-            line_chart_color = "red" # 赤字になったら赤色にする
+            line_chart_color_hex = "#ff0000" # 赤字になったら赤色にする
 
-        st.line_chart(simulation_df.set_index("年")["年末資産"], color=line_chart_color)
+        # Streamlitのline_chartのcolor引数は、単一のSeriesの場合でもリストで渡すのが安全
+        st.line_chart(simulation_df.set_index("年")["年末資産"], color=[line_chart_color_hex])
 
         # マイナスになる年数と最大マイナス額の表示
         negative_assets_df = simulation_df[simulation_df['年末資産'] < 0]
