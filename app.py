@@ -272,21 +272,23 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
         # 型変換を試みる
         if isinstance(value, str):
             try:
-                # 数値に変換できるか試す (浮動小数点数優先)
-                if '.' in value or 'e' in value.lower(): # 浮動小数点数または指数表記
-                    value = float(value)
+                # Attempt float conversion first
+                float_value = float(value)
+                # Check if it's an integer in float form (e.g., 2.0)
+                if float_value == int(float_value):
+                    value = int(float_value)
                 else:
-                    value = int(value)
+                    value = float_value
             except ValueError:
-                pass # 文字列のまま
+                pass # Keep as string if not convertible to number
 
         current_dict = new_data
         for i, key in enumerate(item_path):
             if i == len(item_path) - 1:
-                # 最終要素は値を設定
+                # Final element, set the value
                 current_dict[key] = value
             else:
-                # 中間要素は辞書が存在するか確認し、なければ作成
+                # Intermediate element, ensure it's a dictionary
                 if key not in current_dict or not isinstance(current_dict[key], dict):
                     current_dict[key] = {}
                 current_dict = current_dict[key]
