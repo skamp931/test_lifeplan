@@ -213,7 +213,17 @@ def simulate_life_plan(data):
         annual_income_yen = (current_monthly_salary_main_yen + current_monthly_salary_sub_yen) * 12 + current_bonus_annual_yen + annual_insurance_payout_yen
 
         # 月額支出合計 (千円) - インフレ適用
-        current_base_monthly_exp_thousand_yen = sum(current_expenditure_values_thousand_yen.values())
+        # 住宅ローンがある場合、住宅費は加算しない
+        current_base_monthly_exp_thousand_yen = 0
+        for key_exp, value_exp in current_expenditure_values_thousand_yen.items():
+            # 住宅費であり、かつ住宅ローンがアクティブな場合は加算しない
+            if key_exp == 'housing' and housing_loan["loan_amount"] > 0 and \
+               housing_loan["start_year"] <= year and \
+               (year - housing_loan["start_year"] + 1) <= housing_loan["loan_term_years"]:
+                pass # 住宅ローンでカバーされるため、住宅費は加算しない
+            else:
+                current_base_monthly_exp_thousand_yen += value_exp
+
         # 月額支出合計にのみインフレ率を適用し、年間支出に変換
         inflated_base_annual_expenditure_yen = (current_base_monthly_exp_thousand_yen * 1000 * 12) * ((1 + inflation_rate)**(year - 1))
         # シミュレーション結果表示用のインフレ適用後の月額支出
@@ -653,21 +663,12 @@ def main():
             # Store the uploaded DataFrame for viewing later
             st.session_state.uploaded_csv_df = df_uploaded.copy()
 
-            # Get expected columns from initial data structure for version check
-            expected_df_for_comparison = pd.DataFrame(flatten_data_for_csv(get_initial_data()))
-            expected_columns = set(expected_df_for_comparison["項目"].tolist())
-            
-            # Assuming '項目' column exists in uploaded CSV
-            uploaded_columns = set(df_uploaded["項目"].tolist()) 
+            # バージョン管理は行わず、常にデータを読み込む
+            st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
+            st.success("データが正常にアップロードされ、反映されました！")
+            st.warning("アップロードされたCSVの項目が現在のアプリのバージョンと異なる場合、正しく読み込めない可能性があります。")
+            st.info("現在のアプリのバージョンに合わせたCSVをダウンロードし、データを移行することをお勧めします。")
 
-            # Check for structural compatibility
-            if uploaded_columns != expected_columns:
-                st.warning("アップロードされたCSVの項目が現在のアプリのバージョンと異なります。正しく読み込めない可能性があります。")
-                st.info("現在のアプリのバージョンに合わせたCSVをダウンロードし、データを移行することをお勧めします。")
-                st.session_state.data = get_initial_data() # Reset to default if structure is incompatible
-            else:
-                st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
-                st.success("データが正常にアップロードされ、反映されました！")
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
             # エラー時に初期データを再設定
@@ -866,6 +867,13 @@ def main():
             st.session_state.data["housing_loan"]["loan_term_years"]
         )
         st.info(f"**月々のローン返済額 (目安):** {int(monthly_loan_payment_display):,} 円")
+
+        # 住宅ローンの金利合計額を表示
+        if st.session_state.data["housing_loan"]["loan_amount"] > 0 and st.session_state.data["housing_loan"]["loan_term_years"] > 0:
+            total_loan_payments_yen = monthly_loan_payment_yen * (st.session_state.data["housing_loan"]["loan_term_years"] * 12)
+            total_interest_paid_yen = total_loan_payments_yen - (st.session_state.data["housing_loan"]["loan_amount"] * 10000)
+            st.info(f"**住宅ローンの金利合計額:** {int(total_interest_paid_yen):,} 円")
+
 
     with col5:
         st.subheader("保険設定")
