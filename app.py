@@ -74,7 +74,7 @@ def get_initial_data():
         "insurance_policies": [ # 保険をリストで管理
             # {"name": "生命保険A", "monthly_premium": 10000, "maturity_year": 0, "payout_amount": 0, "start_year": 1}, # 満期年数0は満期なし
         ],
-        "other_lump_sums": [ # その他一時金 (万円)
+        "other_lump_expenditures": [ # その他一時支出金 (万円)
             # {"name": "車購入", "amount": 300, "year": 5},
         ],
         "housing_loan": {
@@ -118,7 +118,7 @@ def simulate_life_plan(data):
     expenditure_config = data["expenditure"]
     school_lump_sums_config = data["school_lump_sums"]
     insurance_policies = data["insurance_policies"]
-    other_lump_sums = data["other_lump_sums"]
+    other_lump_expenditures = data["other_lump_expenditures"] # 名称変更
     housing_loan = data["housing_loan"]
 
     years_to_simulate = family["years_to_simulate"]
@@ -206,26 +206,26 @@ def simulate_life_plan(data):
         # 年間収入の計算 (円)
         annual_income_yen = (current_monthly_salary_main_yen + current_monthly_salary_sub_yen) * 12 + current_bonus_annual_yen
 
-        # 基本年間支出の計算 (千円を円に、インフレ考慮)
-        # 現在の支出設定 (年齢による変化が適用されたもの) を使用
+        # 月額支出合計 (千円) - インフレ適用
         current_base_monthly_exp_thousand_yen = sum(current_expenditure_values_thousand_yen.values())
+        # 月額支出合計にのみインフレ率を適用し、年間支出に変換
         inflated_base_annual_expenditure_yen = (current_base_monthly_exp_thousand_yen * 1000 * 12) * ((1 + inflation_rate)**(year - 1))
 
-        # 保険料の年間支出 (円)
+        # 保険料の年間支出 (円) - インフレ適用なし
         annual_insurance_premium_yen = 0
         for policy in insurance_policies:
             if policy["start_year"] <= year: # 支払い開始年以降
                 annual_insurance_premium_yen += policy["monthly_premium"] * 12
 
-        # 住宅ローン返済額の年間支出 (円)
+        # 住宅ローン返済額の年間支出 (円) - インフレ適用なし
         annual_housing_loan_payment_yen = 0
         # ローン開始年以降、かつ返済期間内の場合のみ計上
         if housing_loan["loan_amount"] > 0 and housing_loan["loan_term_years"] > 0 and housing_loan["start_year"] <= year and (year - housing_loan["start_year"] + 1) <= housing_loan["loan_term_years"]:
             annual_housing_loan_payment_yen = monthly_loan_payment_yen * 12
 
-        # 学校一時金の年間支出 (円)
+        # 学校一時金の年間支出 (円) - インフレ適用なし
         annual_school_lump_sum_yen = 0
-        # 学校在学費用 (円)
+        # 学校在学費用 (円) - インフレ適用なし
         annual_school_enrollment_cost_yen = 0
 
         for member_name, age_in_sim_start_of_year in member_current_ages_in_sim.items():
@@ -243,45 +243,75 @@ def simulate_life_plan(data):
                         if school_info["start_age"] <= age_in_sim_start_of_year <= enrollment_end_age:
                             annual_school_enrollment_cost_yen += school_info["annual_cost"] * 10000 # 万円を円に
 
-        # その他一時金 (円)
-        annual_other_lump_sum_yen = 0
-        for lump_sum in other_lump_sums:
+        # その他一時支出金 (円) - インフレ適用なし
+        annual_other_lump_expenditure_yen = 0 # 名称変更
+        for lump_sum in other_lump_expenditures: # 変数名変更
             if lump_sum["year"] == year:
-                annual_other_lump_sum_yen += lump_sum["amount"] * 10000 # 万円を円に
+                annual_other_lump_expenditure_yen += lump_sum["amount"] * 10000 # 万円を円に
 
-        # 合計年間支出
-        current_annual_expenditure_yen = inflated_base_annual_expenditure_yen + annual_insurance_premium_yen + annual_housing_loan_payment_yen + annual_school_lump_sum_yen + annual_school_enrollment_cost_yen + annual_other_lump_sum_yen
+        # 合計年間支出 (インフレ適用は月額支出合計のみ)
+        current_annual_total_expenditure_yen = inflated_base_annual_expenditure_yen + annual_insurance_premium_yen + annual_housing_loan_payment_yen + annual_school_lump_sum_yen + annual_school_enrollment_cost_yen + annual_other_lump_expenditure_yen
 
         # 年間収支 (円)
-        annual_balance_yen = annual_income_yen - current_annual_expenditure_yen
-
-        # 資産の変動 (投資利回り考慮)
-        current_assets = current_assets * (1 + investment_return_rate) + annual_balance_yen
+        annual_balance_yen = annual_income_yen - current_annual_total_expenditure_yen
 
         # 満期保険の受取処理 (円)
+        annual_insurance_payout_yen = 0 # 新規
         for policy in insurance_policies:
             if policy["maturity_year"] > 0 and year == policy["maturity_year"]:
-                current_assets += policy["payout_amount"] * 10000 # 万円を円に
+                annual_insurance_payout_yen += policy["payout_amount"] * 10000 # 万円を円に
+        
+        # 資産の変動 (投資利回り考慮)
+        current_assets = current_assets * (1 + investment_return_rate) + annual_balance_yen + annual_insurance_payout_yen # 満期金は収支に含まれないので別途加算
 
         row_data = {
             "年": year,
+            # メンバーの年齢は後で追加
             "年間収入": int(annual_income_yen),
-            "月額支出合計": int(current_base_monthly_exp_thousand_yen * 1000), # 千円を円に
-            "保険支出": int(annual_insurance_premium_yen),
-            "年間支出": int(current_annual_expenditure_yen),
-            "住宅ローン額(再掲)": int(annual_housing_loan_payment_yen), # 再掲
-            "学校一時金(再掲)": int(annual_school_lump_sum_yen), # 再掲
-            "学校在学費用": int(annual_school_enrollment_cost_yen),
-            "その他一時金": int(annual_other_lump_sum_yen),
+            "年間支出": int(current_annual_total_expenditure_yen),
             "年間収支": int(annual_balance_yen),
-            "年末資産": int(current_assets)
+            "年末資産": int(current_assets),
+            "月額支出合計（再掲）": int(current_base_monthly_exp_thousand_yen * 1000), # 千円を円に
+            "保険支出（再掲）": int(annual_insurance_premium_yen),
+            "住宅ローン額（再掲）": int(annual_housing_loan_payment_yen),
+            "学校一時金（再掲）": int(annual_school_lump_sum_yen),
+            "学校在学費用（再掲）": int(annual_school_enrollment_cost_yen),
+            "その他一時支出金（再掲）": int(annual_other_lump_expenditure_yen), # 名称変更
+            "保険満期金（再掲）": int(annual_insurance_payout_yen), # 新規
         }
 
         # 家族メンバーのその年の年齢を追加
-        for name, age in member_current_ages_in_sim.items():
-            row_data[f"{name} 年齢"] = age
+        member_age_data = {f"{name} 年齢": age for name, age in member_current_ages_in_sim.items()}
+        
+        # 順序を保持するためにOrderedDictやリストを使うのが一般的だが、
+        # Python 3.7+ のdictは挿入順序を保持するため、直接マージする
+        
+        # 指定された列順序
+        ordered_columns = [
+            "年",
+            # メンバーの年齢は動的に追加されるため、後で挿入
+            "年間収入",
+            "年間支出",
+            "年間収支",
+            "年末資産",
+            "月額支出合計（再掲）",
+            "保険支出（再掲）",
+            "住宅ローン額（再掲）",
+            "学校一時金（再掲）",
+            "学校在学費用（再掲）",
+            "その他一時支出金（再掲）",
+            "保険満期金（再掲）",
+        ]
 
-        results.append(row_data)
+        # メンバー年齢の列を正しい位置に挿入
+        final_ordered_row_data = {}
+        for col in ordered_columns:
+            if col == "年間収入": # 「年間収入」の直前にメンバー年齢を挿入
+                for member_name in sorted(member_current_ages_in_sim.keys()):
+                    final_ordered_row_data[f"{member_name} 年齢"] = member_age_data[f"{member_name} 年齢"]
+            final_ordered_row_data[col] = row_data[col]
+        
+        results.append(final_ordered_row_data)
 
         # 家族メンバーの年齢を更新 (次の年のために)
         for name in member_current_ages_in_sim:
@@ -368,16 +398,16 @@ async def get_gemini_suggestion(user_plan_description, simulation_df, current_da
 
 # --- Q&Aデータ ---
 qa_data = [
-    {"q": "ライフプランとは何ですか？", "a": "ライフプランとは、人生の目標や夢を実現するために、将来の収入と支出、資産形成などを計画することです。"},
-    {"q": "シミュレーションで何がわかりますか？", "a": "現在の収入と支出、資産状況から、将来の貯蓄額や資産の推移を予測し、目標達成が可能かどうかの目安がわかります。"},
-    {"q": "初期値を変更できますか？", "a": "はい、家族構成、収入、支出の各項目で数値を自由に変更してシミュレーションできます。"},
-    {"q": "データはどのように保存できますか？", "a": "現在のシミュレーションデータをCSV形式でダウンロードできます。次回利用時にアップロードして続きから始められます。"},
-    {"q": "AIからの改善提案はどのように利用しますか？", "a": "あなたのライフプランに関する情報を入力すると、AIがその内容を分析し、改善のための具体的なアドバイスを生成します。"},
-    {"q": "このサイトは無料で使えますか？", "a": "はい、このサイトは無料でご利用いただけます。"},
-    {"q": "家族が増えた場合のシミュレーションは？", "a": "「家族構成」の項目で「子供」の数を増やしたり、それに応じた教育費などを「支出」に追加してシミュレーションできます。"},
-    {"q": "投資利回りはどのように設定すれば良いですか？", "a": "ご自身の投資経験やリスク許容度に合わせて設定してください。一般的には、低リスクの金融商品では低く、高リスクでは高く設定します。"},
-    {"q": "老後資金の目標額はどのように計算しますか？", "a": "総務省などの公開データや、ご自身の理想とする老後の生活費から逆算して設定するのが一般的です。"},
-    {"q": "住宅ローンのシミュレーションはできますか？", "a": "直接的な住宅ローンシミュレーション機能はありませんが、毎月の返済額を「支出」に加えることで、全体への影響を把握できます。"}
+    {"q": "ライフプランシミュレーションとは何ですか？", "a": "ライフプランシミュレーションは、あなたの現在の収入、支出、資産状況に基づき、将来の貯蓄額や資産の推移を予測するツールです。人生の目標達成が可能かどうかの目安を把握し、計画を見直すのに役立ちます。"},
+    {"q": "シミュレーションでどのような情報がわかりますか？", "a": "シミュレーション結果の表では、年ごとの収入、支出、収支、年末資産の他、家族メンバーの年齢、月額支出合計、保険支出、住宅ローン額、学校一時金、学校在学費用、その他一時支出金、保険満期金といった詳細な財務状況を確認できます。"},
+    {"q": "初期設定値は変更できますか？", "a": "はい、家族構成、収入、支出、投資利回り、インフレ率など、すべての初期設定値を自由に調整して、ご自身の状況に合わせたシミュレーションを行うことができます。"},
+    {"q": "家族の年齢によって収入や支出は変わりますか？", "a": "はい、主要なメンバーが60歳と65歳に達した際の収入と支出を個別に設定できます。これにより、退職後の生活費の変化などをシミュレーションに反映させることが可能です。"},
+    {"q": "教育費はどのように計算されますか？", "a": "教育費は「学校一時金」（入学時などのまとまった費用）と「年間在学費用」（在学中に毎年かかる費用）に分けて設定できます。各学校の開始年齢と在学期間に基づいて、自動的に費用が計上されます。"},
+    {"q": "車やリフォームなどの大きな出費も考慮できますか？", "a": "はい、「その他一時支出金」の項目で、車購入やリフォームなど、特定の年に発生するまとまった支出を複数追加してシミュレーションに含めることができます。"},
+    {"q": "シミュレーション結果の表にある「再掲」とは何ですか？", "a": "「再掲」と記載されている項目（例：月額支出合計、保険支出、住宅ローン額、学校一時金など）は、年間支出の内訳として、その詳細を再度表示しているものです。全体の支出の内訳を分かりやすくするために表示しています。"},
+    {"q": "シミュレーション結果のセルの色や文字色は何を示していますか？", "a": "年間収支がマイナスの場合は文字色が赤色になり、注意を促します。また、家族メンバーが65歳に達した年の年齢は文字色が青色になり、ライフイベントの目安として表示されます。再掲項目は文字色が灰色で表示されます。"},
+    {"q": "シミュレーションデータは保存できますか？", "a": "はい、現在のシミュレーション設定データをCSV形式でダウンロードできます。次回アプリを利用する際に、このCSVファイルをアップロードすることで、前回の設定からシミュレーションを再開できます。"},
+    {"q": "AIからの改善提案はどのように利用しますか？", "a": "あなたのライフプランに関する目標や課題を入力すると、AIがシミュレーション結果に基づいて、資産形成を加速するための具体的なアドバイスや行動計画を提案します。"}
 ]
 
 # --- 各項目の期待される型を定義するマップ ---
@@ -452,7 +482,7 @@ TYPE_MAP = {
     "housing_loan.loan_amount": int, # 万円
     "housing_loan.loan_interest_rate": float,
     "housing_loan.loan_term_years": int,
-    "housing_loan.start_year": int, # 新規
+    "housing_loan.start_year": int,
 
 }
 
@@ -464,8 +494,8 @@ DYNAMIC_LIST_ITEM_TYPE_MAP = {
     "maturity_year": int,
     "payout_amount": int, # 万円
     "start_year": int, # 保険と住宅ローン両方で使用
-    "amount": int, # 万円 (other_lump_sums用)
-    "year": int,   # (other_lump_sums用)
+    "amount": int, # 万円 (other_lump_expenditures用)
+    "year": int,   # (other_lump_expenditures用)
 }
 
 # --- データをフラット化してCSV用に変換するヘルパー関数 ---
@@ -490,11 +520,11 @@ def flatten_data_for_csv(data_dict, parent_key=''):
 def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     new_data = initial_data_structure.copy() # 初期構造をコピーして変更
 
-    # 動的なリスト（家族メンバー、保険、その他一時金）をCSVから再構築するために、
+    # 動的なリスト（家族メンバー、保険、その他一時支出金）をCSVから再構築するために、
     # まず初期データ構造の対応するリストをクリアします。
     new_data["family"]["members"] = []
     new_data["insurance_policies"] = []
-    new_data["other_lump_sums"] = []
+    new_data["other_lump_expenditures"] = [] # 名称変更
 
     for index, row in df_uploaded.iterrows():
         item_path_str = str(row["項目"]) # Ensure item_path_str is always a string
@@ -560,8 +590,8 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
                         if parent_key_for_list == "members":
                             current_level.append({"name": "", "initial_age": 0})
                         elif parent_key_for_list == "insurance_policies":
-                            current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1}) # start_year追加
-                        elif parent_key_for_list == "other_lump_sums":
+                            current_level.append({"name": "", "monthly_premium": 0, "maturity_year": 0, "payout_amount": 0, "start_year": 1})
+                        elif parent_key_for_list == "other_lump_expenditures": # 名称変更
                             current_level.append({"name": "", "amount": 0, "year": 0})
                         else:
                             current_level.append({}) # Generic dict if type unknown
@@ -579,28 +609,21 @@ def unflatten_data_from_csv(df_uploaded, initial_data_structure):
     return new_data
 
 # --- DataFrameのスタイル設定ヘルパー関数 ---
-def highlight_rekei_columns(s):
-    # s は Series (DataFrameの1列)
-    # s.name はその列の名前
-    if s.name == '住宅ローン額(再掲)' or s.name == '学校一時金(再掲)':
-        # 列全体にスタイルを適用するため、sの長さと同じリストを返す
-        return ['background-color: #e0e0e0'] * len(s)
-    return [''] * len(s) # スタイルを適用しない場合は空文字列のリストを返す
+def apply_rekei_style(s):
+    # '再掲'列の文字色を灰色にする
+    if s.name in ['月額支出合計（再掲）', '保険支出（再掲）', '住宅ローン額（再掲）', '学校一時金（再掲）', '学校在学費用（再掲）', 'その他一時支出金（再掲）', '保険満期金（再掲）']:
+        return ['color: #808080'] * len(s) # 灰色
+    return [''] * len(s)
 
-def highlight_negative_balance(val):
-    # '年間収支'がマイナスの場合にセルをハイライト
-    color = 'background-color: #ffe0e0' if isinstance(val, (int, float)) and val < 0 else ''
+def apply_negative_balance_style(val):
+    # '年間収支'がマイナスの場合に文字色を赤色にする
+    color = 'color: red' if isinstance(val, (int, float)) and val < 0 else ''
     return color
 
-def highlight_65_age(s):
-    # メンバーの年齢列で65歳の場合にセルをハイライト
-    styles = []
-    for col_name, value in s.items():
-        if "年齢" in col_name and isinstance(value, (int, float)) and value == 65:
-            styles.append('background-color: #d0e0ff') # 薄い青色
-        else:
-            styles.append('')
-    return styles
+def apply_65_age_style(val):
+    # メンバーの年齢が65歳の場合に文字色を青色にする
+    color = 'color: blue' if isinstance(val, (int, float)) and val == 65 else ''
+    return color
 
 
 # --- Streamlit アプリケーションの構築 ---
@@ -852,31 +875,31 @@ def main():
             st.session_state.insurance_count -= 1
             st.rerun()
 
-        st.subheader("その他一時金")
-        # その他一時金の動的な追加・削除
-        if "other_lump_sums_count" not in st.session_state:
-            st.session_state.other_lump_sums_count = len(st.session_state.data["other_lump_sums"])
-        elif st.session_state.other_lump_sums_count != len(st.session_state.data["other_lump_sums"]):
-            st.session_state.other_lump_sums_count = len(st.session_state.data["other_lump_sums"])
+        st.subheader("その他一時支出金") # 名称変更
+        # その他一時支出金の動的な追加・削除
+        if "other_lump_expenditures_count" not in st.session_state: # 変数名変更
+            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"]) # 変数名変更
+        elif st.session_state.other_lump_expenditures_count != len(st.session_state.data["other_lump_expenditures"]): # 変数名変更
+            st.session_state.other_lump_expenditures_count = len(st.session_state.data["other_lump_expenditures"]) # 変数名変更
 
-        for i in range(st.session_state.other_lump_sums_count):
-            st.markdown(f"**一時金 {i+1}**")
-            if i >= len(st.session_state.data["other_lump_sums"]):
-                st.session_state.data["other_lump_sums"].append({"name": "", "amount": 0, "year": 0})
+        for i in range(st.session_state.other_lump_expenditures_count): # 変数名変更
+            st.markdown(f"**一時支出 {i+1}**") # 表示テキスト変更
+            if i >= len(st.session_state.data["other_lump_expenditures"]): # 変数名変更
+                st.session_state.data["other_lump_expenditures"].append({"name": "", "amount": 0, "year": 0}) # 変数名変更
 
-            lump_sum_item = st.session_state.data["other_lump_sums"][i]
-            lump_sum_item["name"] = st.text_input(f"一時金名", value=lump_sum_item["name"], key=f"other_lump_sum_name_{i}")
-            lump_sum_item["amount"] = st.number_input(f"金額 (万円)", min_value=0, value=lump_sum_item["amount"], step=10, key=f"other_lump_sum_amount_{i}")
-            lump_sum_item["year"] = st.number_input(f"発生年 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=lump_sum_item["year"], step=1, key=f"other_lump_sum_year_{i}")
+            lump_sum_item = st.session_state.data["other_lump_expenditures"][i] # 変数名変更
+            lump_sum_item["name"] = st.text_input(f"一時支出名", value=lump_sum_item["name"], key=f"other_lump_expenditure_name_{i}") # 変数名変更
+            lump_sum_item["amount"] = st.number_input(f"金額 (万円)", min_value=0, value=lump_sum_item["amount"], step=10, key=f"other_lump_expenditure_amount_{i}") # 変数名変更
+            lump_sum_item["year"] = st.number_input(f"発生年 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=lump_sum_item["year"], step=1, key=f"other_lump_expenditure_year_{i}") # 変数名変更
 
-        if st.button("その他一時金を追加", key="add_other_lump_sum_btn"):
-            st.session_state.data["other_lump_sums"].append({"name": f"新規一時金 {st.session_state.other_lump_sums_count + 1}", "amount": 0, "year": 0})
-            st.session_state.other_lump_sums_count += 1
+        if st.button("その他一時支出金を追加", key="add_other_lump_expenditure_btn"): # 名称変更
+            st.session_state.data["other_lump_expenditures"].append({"name": f"新規一時支出 {st.session_state.other_lump_expenditures_count + 1}", "amount": 0, "year": 0}) # 名称変更
+            st.session_state.other_lump_expenditures_count += 1 # 変数名変更
             st.rerun()
 
-        if st.session_state.other_lump_sums_count > 0 and st.button("最後のその他一時金を削除", key="remove_other_lump_sum_btn"):
-            st.session_state.data["other_lump_sums"].pop()
-            st.session_state.other_lump_sums_count -= 1
+        if st.session_state.other_lump_expenditures_count > 0 and st.button("最後のその他一時支出金を削除", key="remove_other_lump_expenditure_btn"): # 名称変更
+            st.session_state.data["other_lump_expenditures"].pop() # 変数名変更
+            st.session_state.other_lump_expenditures_count -= 1 # 変数名変更
             st.rerun()
 
 
@@ -894,7 +917,7 @@ def main():
     # --- シミュレーション結果 ---
     st.header("3. シミュレーション結果")
     st.markdown("設定したライフプランに基づいた将来の資産推移です。")
-    # st.markdown("※「住宅ローン額」と「学校一時金」は、それぞれの支出項目からの**再掲**です。") # 再掲であることを記載
+    st.markdown("※「月額支出合計」「保険支出」「住宅ローン額」「学校一時金」「学校在学費用」「その他一時支出金」「保険満期金」は、それぞれの支出項目からの**再掲**です。") # 再掲であることを記載
 
     if st.session_state.run_simulation:
         simulation_df = simulate_life_plan(st.session_state.data)
@@ -904,30 +927,29 @@ def main():
         # formatを最初に適用
         styled_df = simulation_df.style.format({
             "年間収入": "{:,}円",
-            "月額支出合計": "{:,}円",
-            "保険支出": "{:,}円",
             "年間支出": "{:,}円",
-            "住宅ローン額(再掲)": "{:,}円",
-            "学校一時金(再掲)": "{:,}円",
-            "学校在学費用": "{:,}円",
-            "その他一時金": "{:,}円",
             "年間収支": "{:,}円",
-            "年末資産": "{:,}円"
+            "年末資産": "{:,}円",
+            "月額支出合計（再掲）": "{:,}円",
+            "保険支出（再掲）": "{:,}円",
+            "住宅ローン額（再掲）": "{:,}円",
+            "学校一時金（再掲）": "{:,}円",
+            "学校在学費用（再掲）": "{:,}円",
+            "その他一時支出金（再掲）": "{:,}円",
+            "保険満期金（再掲）": "{:,}円",
+            # メンバー年齢の列は自動的に表示されるため、ここでは特別なフォーマットは不要
         })
         
-        # 再掲列の背景色
-        # apply(axis=0) は列ごとにスタイル関数を適用
-        styled_df = styled_df.apply(highlight_rekei_columns, axis=0)
+        # 再掲列の文字色
+        styled_df = styled_df.apply(apply_rekei_style, axis=0) # axis=0 で列全体に適用
         
-        # 年間収支がマイナスのセルの背景色
-        # applymap は個々のセルにスタイル関数を適用
-        styled_df = styled_df.applymap(highlight_negative_balance, subset=['年間収支'])
+        # 年間収支がマイナスのセルの文字色
+        styled_df = styled_df.applymap(apply_negative_balance_style, subset=['年間収支'])
 
-        # メンバーの年齢が65歳の場合のセルの背景色
-        # apply(axis=1) は行ごとにスタイル関数を適用
+        # メンバーの年齢が65歳の場合のセルの文字色
         member_age_cols = [col for col in simulation_df.columns if "年齢" in col]
         if member_age_cols: # メンバー年齢列が存在する場合のみ適用
-            styled_df = styled_df.apply(highlight_65_age, axis=1, subset=member_age_cols)
+            styled_df = styled_df.applymap(apply_65_age_style, subset=member_age_cols)
 
 
         st.dataframe(styled_df, use_container_width=True)
