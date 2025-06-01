@@ -207,7 +207,8 @@ def simulate_life_plan(data):
         # 満期保険の受取処理 (円) - 収入に加算
         annual_insurance_payout_yen = 0
         for policy in insurance_policies:
-            if policy["maturity_year"] > 0 and year == policy["maturity_year"]:
+            # 満期年数が設定されており、かつ現在の年が「支払い開始年 + 満期年数」と一致する場合
+            if policy["maturity_year"] > 0 and year == (policy["start_year"] + policy["maturity_year"]):
                 annual_insurance_payout_yen += policy["payout_amount"] * 10000 # 万円を円に
 
         # 年間収入の計算 (円)
@@ -234,7 +235,8 @@ def simulate_life_plan(data):
         # 保険料の年間支出 (円) - インフレ適用なし
         annual_insurance_premium_yen = 0
         for policy in insurance_policies:
-            if policy["start_year"] <= year: # 支払い開始年以降
+            # 支払い開始年以降、かつ満期年数に達していない場合のみ支払い
+            if policy["start_year"] <= year and year < (policy["start_year"] + policy["maturity_year"]):
                 annual_insurance_premium_yen += policy["monthly_premium"] * 12
 
         # 住宅ローン返済額の年間支出 (円) - インフレ適用なし
@@ -667,7 +669,8 @@ def main():
             # バージョン管理は行わず、常にデータを読み込む
             st.session_state.data = unflatten_data_from_csv(df_uploaded, get_initial_data())
             st.success("データが正常にアップロードされ、反映されました！")
-            st.info("データ内容を確認できます。")
+            # st.warning("アップロードされたCSVの項目が現在のアプリのバージョンと異なる場合、正しく読み込めない可能性があります。") # 削除
+            st.info("データ内容を確認できます。") # 変更
 
         except Exception as e:
             st.error(f"ファイルの読み込み中にエラーが発生しました。ファイル形式が正しいか確認してください。エラー: {e}")
@@ -799,19 +802,19 @@ def main():
         st.session_state.data["expenditure"]["education_at_60"] = st.number_input("60歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_60"], step=1, key="education_60")
         st.session_state.data["expenditure"]["utilities_at_60"] = st.number_input("60歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_60"], step=1, key="utilities_60")
         st.session_state.data["expenditure"]["communication_at_60"] = st.number_input("60歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_60"], step=1, key="communication_60")
-        st.session_state.data["expenditure"]["leisure_at_60"] = st.number_input("60歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_60"], step=1, key="leisure_60") # 修正
-        st.session_state.data["expenditure"]["medical_at_60"] = st.number_input("60歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_60"], step=1, key="medical_60") # 修正
-        st.session_state.data["expenditure"]["other_at_60"] = st.number_input("60歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_60"], step=1, key="other_60") # 修正
+        st.session_state.data["expenditure"]["leisure_at_60"] = st.number_input("60歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_60"], step=1, key="leisure_60")
+        st.session_state.data["expenditure"]["medical_at_60"] = st.number_input("60歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_60"], step=1, key="medical_60")
+        st.session_state.data["expenditure"]["other_at_60"] = st.number_input("60歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_60"], step=1, key="other_60")
 
-        st.session_state.data["expenditure"]["housing_at_65"] = st.number_input("65歳時 住居費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["housing_at_65"], step=5, key="housing_65") # 修正
-        st.session_state.data["expenditure"]["food_at_65"] = st.number_input("65歳時 食費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["food_at_65"], step=1, key="food_65") # 修正
-        st.session_state.data["expenditure"]["transportation_at_65"] = st.number_input("65歳時 交通費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["transportation_at_65"], step=1, key="transportation_65") # 修正
-        st.session_state.data["expenditure"]["education_at_65"] = st.number_input("65歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_65"], step=1, key="education_65") # 修正
-        st.session_state.data["expenditure"]["utilities_at_65"] = st.number_input("65歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_65"], step=1, key="utilities_65") # 修正
-        st.session_state.data["expenditure"]["communication_at_65"] = st.number_input("65歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_65"], step=1, key="communication_65") # 修正
-        st.session_state.data["expenditure"]["leisure_at_65"] = st.number_input("65歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_65"], step=1, key="leisure_65") # 修正
-        st.session_state.data["expenditure"]["medical_at_65"] = st.number_input("65歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_65"], step=1, key="medical_65") # 修正
-        st.session_state.data["expenditure"]["other_at_65"] = st.number_input("65歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_65"], step=1, key="other_65") # 修正
+        st.session_state.data["expenditure"]["housing_at_65"] = st.number_input("65歳時 住居費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["housing_at_65"], step=5, key="housing_65")
+        st.session_state.data["expenditure"]["food_at_65"] = st.number_input("65歳時 食費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["food_at_65"], step=1, key="food_65")
+        st.session_state.data["expenditure"]["transportation_at_65"] = st.number_input("65歳時 交通費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["transportation_at_65"], step=1, key="transportation_65")
+        st.session_state.data["expenditure"]["education_at_65"] = st.number_input("65歳時 教育費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["education_at_65"], step=1, key="education_65")
+        st.session_state.data["expenditure"]["utilities_at_65"] = st.number_input("65歳時 光熱費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["utilities_at_65"], step=1, key="utilities_65")
+        st.session_state.data["expenditure"]["communication_at_65"] = st.number_input("65歳時 通信費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["communication_at_65"], step=1, key="communication_65")
+        st.session_state.data["expenditure"]["leisure_at_65"] = st.number_input("65歳時 娯楽費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["leisure_at_65"], step=1, key="leisure_65")
+        st.session_state.data["expenditure"]["medical_at_65"] = st.number_input("65歳時 医療費 (千円)", min_value=0, value=st.session_state.data["expenditure"]["medical_at_65"], step=1, key="medical_65")
+        st.session_state.data["expenditure"]["other_at_65"] = st.number_input("65歳時 その他 (千円)", min_value=0, value=st.session_state.data["expenditure"]["other_at_65"], step=1, key="other_65")
 
 
     with col4:
@@ -893,7 +896,8 @@ def main():
             policy = st.session_state.data["insurance_policies"][i]
             policy["name"] = st.text_input(f"保険名", value=policy["name"], key=f"ins_name_{i}")
             policy["monthly_premium"] = st.number_input(f"月額保険料 (円)", min_value=0, value=policy["monthly_premium"], step=1000, key=f"ins_premium_{i}")
-            policy["maturity_year"] = st.number_input(f"満期年数 (シミュレーション開始から)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["maturity_year"], step=1, key=f"ins_maturity_year_{i}")
+            # 満期年数を「支払い開始年からの年数」として入力
+            policy["maturity_year"] = st.number_input(f"満期年数 (支払い開始年からの年数)", min_value=0, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["maturity_year"], step=1, key=f"ins_maturity_year_{i}")
             policy["payout_amount"] = st.number_input(f"満期時の受取額 (万円)", min_value=0, value=policy["payout_amount"], step=10, key=f"ins_payout_{i}")
             policy["start_year"] = st.number_input(f"支払い開始年 (シミュレーション開始から)", min_value=1, max_value=st.session_state.data["family"]["years_to_simulate"], value=policy["start_year"], step=1, key=f"ins_start_year_{i}")
 
@@ -904,7 +908,7 @@ def main():
 
         if st.session_state.insurance_count > 0 and st.button("最後の保険を削除", key="remove_insurance_btn"):
             st.session_state.data["insurance_policies"].pop()
-            st.session_state.members_count -= 1
+            st.session_state.other_lump_expenditures_count -= 1 # ここが誤りだったため修正
             st.rerun()
 
         st.subheader("その他一時支出金")
